@@ -20,25 +20,37 @@ const TB64LUT_INIT: [u16; 4096] = {
 static TB64LUT_LE: AlignedLut = AlignedLut(TB64LUT_INIT);
 
 #[inline(always)]
-const fn enc3_lut(a: u8, b: u8, c: u8) -> u32 {
-    let idx1 = ((a as usize) << 4) | ((b as usize) >> 4);
-    let idx2 = (((b as usize) & 0x0F) << 8) | (c as usize);
+const fn encoded_len(n: usize) -> usize {
+    ((n + 2) / 3) * 4
+}
 
+#[inline(always)]
+const fn lut_pack(idx1: usize, idx2: usize) -> u32 {
     let v1 = TB64LUT_LE.0[idx1] as u32;
     let v2 = TB64LUT_LE.0[idx2] as u32;
-
     v1 | (v2 << 16) // listo para store LE (4 bytes)
+}
+
+#[inline(always)]
+const fn idx1_from_abc(a: u8, b: u8) -> usize {
+    ((a as usize) << 4) | ((b as usize) >> 4)
+}
+
+#[inline(always)]
+const fn idx2_from_abc(b: u8, c: u8) -> usize {
+    (((b as usize) & 0x0F) << 8) | (c as usize)
+}
+
+#[inline(always)]
+const fn enc3_lut(a: u8, b: u8, c: u8) -> u32 {
+    lut_pack(idx1_from_abc(a, b), idx2_from_abc(b, c))
 }
 
 #[inline(always)]
 const fn enc3_lut_u32_be(u: u32) -> u32 {
     let idx1 = (u >> 20) as usize;
     let idx2 = ((u >> 8) & 0x0FFF) as usize;
-
-    let v1 = TB64LUT_LE.0[idx1] as u32;
-    let v2 = TB64LUT_LE.0[idx2] as u32;
-
-    v1 | (v2 << 16)
+    lut_pack(idx1, idx2)
 }
 
 #[inline(always)]
@@ -70,8 +82,31 @@ const fn encode_block_48_to_64(inp: &[u8; 48], out: &mut [u8; 64]) {
 }
 
 #[inline(always)]
+fn encode_tail_rem1(rem0: u8, out4: &mut [u8; 4]) {
+    let idx = idx1_from_abc(rem0, 0);
+    let p = TB64LUT_LE.0[idx].to_le_bytes();
+    out4[0] = p[0];
+    out4[1] = p[1];
+    out4[2] = b'=';
+    out4[3] = b'=';
+}
+
+#[inline(always)]
+fn encode_tail_rem2(rem0: u8, rem1: u8, out4: &mut [u8; 4]) {
+    let idx1 = idx1_from_abc(rem0, rem1);
+    let idx2 = idx2_from_abc(rem1, 0);
+    let p1 = TB64LUT_LE.0[idx1].to_le_bytes();
+    let p2 = TB64LUT_LE.0[idx2].to_le_bytes();
+
+    out4[0] = p1[0];
+    out4[1] = p1[1];
+    out4[2] = p2[0];
+    out4[3] = b'=';
+}
+
+#[inline(always)]
 fn encode_scalar_tail(in_data: &[u8], out: &mut [u8]) -> usize {
-    let needed = ((in_data.len() + 2) / 3) * 4;
+    let needed = encoded_len(in_data.len());
     debug_assert!(out.len() >= needed);
 
     let out = &mut out[..needed];
@@ -87,27 +122,10 @@ fn encode_scalar_tail(in_data: &[u8], out: &mut [u8]) -> usize {
 
     if !rem.is_empty() {
         let o = &mut out4[in3.len()];
-        let b0 = rem[0] as u32;
-
         if rem.len() == 1 {
-            let idx = ((b0 << 4) & 0x0FFF) as usize;
-            let p = TB64LUT_LE.0[idx].to_le_bytes();
-            o[0] = p[0];
-            o[1] = p[1];
-            o[2] = b'=';
-            o[3] = b'=';
+            encode_tail_rem1(rem[0], o);
         } else {
-            let b1 = rem[1] as u32;
-            let idx1 = (((b0 << 4) | (b1 >> 4)) & 0x0FFF) as usize;
-            let idx2 = (((b1 & 0x0F) << 8) & 0x0FFF) as usize;
-
-            let p1 = TB64LUT_LE.0[idx1].to_le_bytes();
-            let p2 = TB64LUT_LE.0[idx2].to_le_bytes();
-
-            o[0] = p1[0];
-            o[1] = p1[1];
-            o[2] = p2[0];
-            o[3] = b'=';
+            encode_tail_rem2(rem[0], rem[1], o);
         }
     }
 
@@ -115,7 +133,7 @@ fn encode_scalar_tail(in_data: &[u8], out: &mut [u8]) -> usize {
 }
 
 pub fn encode_base64_fast(in_data: &[u8], out_data: &mut [u8]) -> usize {
-    let needed = ((in_data.len() + 2) / 3) * 4;
+    let needed = encoded_len(in_data.len());
     debug_assert!(out_data.len() >= needed);
 
     let out = &mut out_data[..needed];
