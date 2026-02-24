@@ -2,22 +2,19 @@ const BASE64_ALPHABET: [u8; 64] =
     *b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 #[repr(align(64))]
-struct AlignedLut([u16; 4096]);
+struct AlignedLut([u32; 4096]);
 
 #[repr(align(64))]
 struct DecLuts {
-    d0: [u32; 256],
-    d1: [u32; 256],
-    d2: [u32; 256],
-    d3: [u32; 256],
+    table: [u32; 1024],
 }
 
-const TB64LUT_INIT: [u16; 4096] = {
-    let mut lut = [0u16; 4096];
+const TB64LUT_INIT: [u32; 4096] = {
+    let mut lut = [0u32; 4096];
     let mut i = 0;
     while i < 4096 {
-        let c0 = BASE64_ALPHABET[(i >> 6) & 0x3F] as u16;
-        let c1 = BASE64_ALPHABET[i & 0x3F] as u16;
+        let c0 = BASE64_ALPHABET[(i >> 6) & 0x3F] as u32;
+        let c1 = BASE64_ALPHABET[i & 0x3F] as u32;
         // little-endian packing: in memory this is [first, second]
         lut[i] = c0 | (c1 << 8);
         i += 1;
@@ -97,11 +94,21 @@ const D3_INIT: [u32; 256] = {
     t
 };
 
+const DEC_TABLE_INIT: [u32; 1024] = {
+    let mut t = [0u32; 1024];
+    let mut i = 0;
+    while i < 256 {
+        t[i] = D0_INIT[i];
+        t[i + 256] = D1_INIT[i];
+        t[i + 512] = D2_INIT[i];
+        t[i + 768] = D3_INIT[i];
+        i += 1;
+    }
+    t
+};
+
 static DEC_LUTS: DecLuts = DecLuts {
-    d0: D0_INIT,
-    d1: D1_INIT,
-    d2: D2_INIT,
-    d3: D3_INIT,
+    table: DEC_TABLE_INIT,
 };
 
 #[inline(always)]
@@ -111,8 +118,8 @@ const fn encoded_len(n: usize) -> usize {
 
 #[inline(always)]
 const fn lut_pack(idx1: usize, idx2: usize) -> u32 {
-    let v1 = TB64LUT_LE.0[idx1] as u32;
-    let v2 = TB64LUT_LE.0[idx2] as u32;
+    let v1 = TB64LUT_LE.0[idx1];
+    let v2 = TB64LUT_LE.0[idx2];
     v1 | (v2 << 16) // listo para store LE (4 bytes)
 }
 
@@ -276,8 +283,8 @@ pub const fn decoded_len_strict(b64: &[u8]) -> Option<usize> {
 
 #[inline(always)]
 const fn du32(a: u8, b: u8, c: u8, d: u8) -> u32 {
-    let x0 = DEC_LUTS.d0[a as usize] | DEC_LUTS.d1[b as usize];
-    let x1 = DEC_LUTS.d2[c as usize] | DEC_LUTS.d3[d as usize];
+    let x0 = DEC_LUTS.table[a as usize] | DEC_LUTS.table[(b as usize) | 256];
+    let x1 = DEC_LUTS.table[(c as usize) | 512] | DEC_LUTS.table[(d as usize) | 768];
     x0 | x1
 }
 
@@ -287,8 +294,9 @@ const fn du32_u32_le(word: u32) -> u32 {
     let b = ((word >> 8) & 0xFF) as usize;
     let c = ((word >> 16) & 0xFF) as usize;
     let d = ((word >> 24) as u8) as usize;
-    let x0 = DEC_LUTS.d0[a] | DEC_LUTS.d1[b];
-    let x1 = DEC_LUTS.d2[c] | DEC_LUTS.d3[d];
+    // Forzando el offset con OR le dice a LLVM que los limites están en 0..1023
+    let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+    let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
     x0 | x1
 }
 
