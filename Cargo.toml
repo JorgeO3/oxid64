@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bitflags = "2.11.0"
 enum_dispatch = "0.3.13"
 rand = "0.10.0"
 
@@ -16,3 +17,11 @@ base64 = "0.22.1"
 [[bench]]
 name = "base64_bench"
 harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = "full"
+panic = "abort"
+incremental = false

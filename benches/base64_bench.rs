@@ -1,6 +1,6 @@
 #![allow(warnings)]
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use oxid64::scalar::{decode_base64_fast, encode_base64_fast};
+use oxid64::simd::scalar::{decode_base64_fast, encode_base64_fast};
 // use oxid64::scalar_unsafe::decode_extreme_unsafe;
 
 unsafe extern "C" {
