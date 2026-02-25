@@ -1,3 +1,5 @@
+use super::Base64Decoder;
+
 const BASE64_ALPHABET: [u8; 64] =
     *b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -291,13 +293,20 @@ const fn du32(a: u8, b: u8, c: u8, d: u8) -> u32 {
 #[inline(always)]
 const fn du32_u32_le(word: u32) -> u32 {
     let a = (word & 0xFF) as usize;
-    let b = ((word >> 8) & 0xFF) as usize;
-    let c = ((word >> 16) & 0xFF) as usize;
-    let d = ((word >> 24) as u8) as usize;
-    // Forzando el offset con OR le dice a LLVM que los limites están en 0..1023
-    let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
-    let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
-    x0 | x1
+    let b = ((word >> 8) & 0xFF) as usize | 256;
+    let c = ((word >> 16) & 0xFF) as usize | 512;
+    let d = ((word >> 24) & 0xFF) as usize | 768;
+
+    let t = &DEC_LUTS.table;
+
+    // Cargar a regs separados (idealmente LLVM lo baja a mov reg,[mem])
+    let x0 = t[a];
+    let x1 = t[b];
+    let x2 = t[c];
+    let x3 = t[d];
+
+    // ORs reg-reg (evita "or reg,[mem]" encadenados)
+    (x0 | x1) | (x2 | x3)
 }
 
 #[inline(always)]
@@ -499,6 +508,26 @@ pub fn decode_base64_fast(in_data: &[u8], out_data: &mut [u8]) -> Option<usize> 
     } else {
         debug_assert_eq!(out_off, out_len);
         Some(out_len)
+    }
+}
+
+pub struct ScalarDecoder;
+
+impl Base64Decoder for ScalarDecoder {
+    fn decode(&self, input: &[u8]) -> Option<Vec<u8>> {
+        let out_len = decoded_len_strict(input)?;
+        let mut out = vec![0u8; out_len];
+        let written = decode_base64_fast(input, &mut out)?;
+        debug_assert_eq!(written, out_len);
+        Some(out)
+    }
+
+    fn encode(&self, input: &[u8]) -> Vec<u8> {
+        let out_len = encoded_len(input.len());
+        let mut out = vec![0u8; out_len];
+        let written = encode_base64_fast(input, &mut out);
+        debug_assert_eq!(written, out_len);
+        out
     }
 }
 

@@ -4,3 +4,9 @@ perf.data
 perf.data.old
 test_tb64
 Cargo.lock
+/perf_reports
+.zed
+/asm_decode.txt
+/flamegraph.svg
+/rustdec.data*
+/cfastdec.data*

@@ -1,4 +1,4 @@
-use oxid64::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
+use oxid64::simd::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
 use std::hint::black_box;
 use std::time::Instant;
 
