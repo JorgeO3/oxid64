@@ -1,0 +1,2627 @@
+.section .text.oxid64::scalar::decode_base64_fast,"ax",@progbits
+	.globl	oxid64::scalar::decode_base64_fast
+	.p2align	4
+.type	oxid64::scalar::decode_base64_fast,@function
+oxid64::scalar::decode_base64_fast:
+		// src/scalar.rs:443
+		pub fn decode_base64_fast(in_data: &[u8], out_data: &mut [u8]) -> Option<usize> {
+	.cfi_startproc
+	push rbp
+	.cfi_def_cfa_offset 16
+	push r15
+	.cfi_def_cfa_offset 24
+	push r14
+	.cfi_def_cfa_offset 32
+	push r13
+	.cfi_def_cfa_offset 40
+	push r12
+	.cfi_def_cfa_offset 48
+	push rbx
+	.cfi_def_cfa_offset 56
+	sub rsp, 72
+	.cfi_def_cfa_offset 128
+	.cfi_offset rbx, -56
+	.cfi_offset r12, -48
+	.cfi_offset r13, -40
+	.cfi_offset r14, -32
+	.cfi_offset r15, -24
+	.cfi_offset rbp, -16
+		// src/scalar.rs:263
+		if n == 0 {
+	test rsi, rsi
+	je .LBB0_1
+		// src/scalar.rs:266
+		if (n & 3) != 0 {
+	test sil, 3
+	jne .LBB0_3
+		// src/scalar.rs:270
+		let pad = if b64[n - 1] == b'=' {
+	cmp byte ptr [rdi + rsi - 1], 61
+	jne .LBB0_5
+	mov rax, -1
+		// src/scalar.rs:271
+		if b64[n - 2] == b'=' { 2 } else { 1 }
+	cmp byte ptr [rdi + rsi - 2], 61
+	jne .LBB0_9
+		// src/scalar.rs:277
+		if pad == 2 && b64[n - 3] == b'=' {
+	cmp rsi, 3
+	jb .LBB0_43
+	mov rax, -2
+	cmp byte ptr [rdi + rsi - 3], 61
+	jne .LBB0_9
+	jmp .LBB0_3
+.LBB0_1:
+	mov eax, 1
+	xor edx, edx
+		// src/scalar.rs:263
+		if n == 0 {
+	jmp .LBB0_39
+.LBB0_5:
+	xor eax, eax
+.LBB0_9:
+		// src/scalar.rs:281
+		Some((n / 4) * 3 - pad)
+	mov r8, rsi
+	shr r8, 2
+	lea r8, [r8 + 2*r8]
+	add r8, rax
+	cmp rcx, r8
+		// src/scalar.rs:444
+		let out_len = decoded_len_strict(in_data)?;
+	jae .LBB0_10
+.LBB0_3:
+	xor eax, eax
+.LBB0_39:
+		// src/scalar.rs:503
+		}
+	add rsp, 72
+	.cfi_def_cfa_offset 56
+	pop rbx
+	.cfi_def_cfa_offset 48
+	pop r12
+	.cfi_def_cfa_offset 40
+	pop r13
+	.cfi_def_cfa_offset 32
+	pop r14
+	.cfi_def_cfa_offset 24
+	pop r15
+	.cfi_def_cfa_offset 16
+	pop rbp
+	.cfi_def_cfa_offset 8
+	ret
+.LBB0_10:
+	.cfi_def_cfa_offset 128
+	mov rcx, rsi
+		// src/scalar.rs:453
+		let body = &in_data[..n - 4];
+	sub rsi, 4
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/num/uint_macros.rs:878
+		if self < rhs {
+	jb .LBB0_44
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/slice/mod.rs:1344
+		let new_len = unsafe { exact_div(self.len(), N) };
+	mov r10, rsi
+	shr r10, 6
+		// src/scalar.rs:461
+		let body_out_len = chunks64.len() * 48;
+	mov rax, r10
+	shl rax, 4
+	lea rcx, [rax + 2*rax]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/slice/mod.rs:2190
+		if mid <= self.len() {
+	mov rax, r8
+	mov qword ptr [rsp + 40], rcx
+	sub rax, rcx
+	jb .LBB0_45
+	mov qword ptr [rsp + 48], rsi
+	mov qword ptr [rsp + 24], rax
+	mov qword ptr [rsp + 56], r8
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/slice/mod.rs:2106
+		from_raw_parts_mut(ptr.add(mid), unchecked_sub(len, mid)),
+	mov eax, r10d
+	and eax, 3
+	mov qword ptr [rsp + 8], rax
+	movabs rax, 144115188075855868
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/slice/mod.rs:2151
+		if mid <= self.len() {
+	and rax, r10
+	mov qword ptr [rsp + 64], rax
+	mov qword ptr [rsp + 32], rdx
+	mov qword ptr [rsp + 16], rdi
+	je .LBB0_13
+	and r10, -4
+	xor r11d, r11d
+	mov r14, qword ptr [rip + oxid64::scalar::DEC_LUTS@GOTPCREL]
+	xor r12d, r12d
+	mov rbp, rdx
+	mov r15, rdi
+	mov rdx, qword ptr [rsp + 8]
+	.p2align	4
+.LBB0_15:
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/slice/mod.rs:2190
+		if mid <= self.len() {
+	cmp r10, r11
+	je .LBB0_16
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/../../stdarch/crates/core_arch/src/x86/sse.rs:1907
+		prefetch(p, (STRATEGY >> 2) & 1, STRATEGY & 3, 1);
+	prefetcht0 byte ptr [r15 + 384]
+	mov eax, dword ptr [r15]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx ecx, ah
+	mov ecx, dword ptr [r14 + 4*rcx + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or ecx, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or ecx, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or ecx, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, ecx
+	mov ebx, dword ptr [r15 + 4]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, bl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, bh
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ebx
+	shr edi, 14
+	and edi, 1020
+	shr ebx, 24
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rbx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp], ecx
+	mov dword ptr [rbp + 3], eax
+	mov ecx, dword ptr [r15 + 8]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r8d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r8d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r8d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r8d, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, r8d
+	or eax, r12d
+	mov ecx, dword ptr [r15 + 12]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r12d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r12d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r12d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r12d, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 6], r8d
+	mov dword ptr [rbp + 9], r12d
+	mov ecx, dword ptr [r15 + 16]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 12], edi
+	mov ecx, dword ptr [r15 + 20]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r8d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r8d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r8d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r8d, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, r8d
+	or r12d, eax
+	mov ecx, dword ptr [r15 + 24]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 15], r8d
+	mov dword ptr [rbp + 18], eax
+	mov ecx, dword ptr [r15 + 28]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 21], edi
+	mov ecx, dword ptr [r15 + 32]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 24], edi
+	mov ecx, dword ptr [r15 + 36]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r8d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r8d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r8d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r8d, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, r8d
+	or eax, r12d
+	mov ecx, dword ptr [r15 + 40]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r12d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r12d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r12d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r12d, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 27], r8d
+	mov dword ptr [rbp + 30], r12d
+	mov ecx, dword ptr [r15 + 44]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 33], edi
+	mov ecx, dword ptr [r15 + 48]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 36], edi
+	mov ecx, dword ptr [r15 + 52]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 39], edi
+	mov ecx, dword ptr [r15 + 56]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r8d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r8d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r8d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r8d, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, r8d
+	or r12d, eax
+	mov ecx, dword ptr [r15 + 60]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 42], r8d
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/num/uint_macros.rs:3821
+		unsafe { mem::transmute(self) }
+	mov ecx, eax
+	shr ecx, 16
+		// src/scalar.rs:352
+		out[45] = bb[0];
+	mov byte ptr [rbp + 45], al
+		// src/scalar.rs:353
+		out[46] = bb[1];
+	mov byte ptr [rbp + 46], ah
+		// src/scalar.rs:354
+		out[47] = bb[2];
+	mov byte ptr [rbp + 47], cl
+	mov ecx, dword ptr [r15 + 64]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:350
+		*cu |= u;
+	or eax, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 48], edi
+	mov ecx, dword ptr [r15 + 68]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 51], edi
+	mov ecx, dword ptr [r15 + 72]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 54], edi
+	mov ecx, dword ptr [r15 + 76]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 57], edi
+	mov ecx, dword ptr [r15 + 80]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r8d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r8d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r8d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r8d, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, r8d
+	or eax, r12d
+	mov ecx, dword ptr [r15 + 84]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r12d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r12d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r12d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r12d, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 60], r8d
+	mov dword ptr [rbp + 63], r12d
+	mov ecx, dword ptr [r15 + 88]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 66], edi
+	mov ecx, dword ptr [r15 + 92]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 69], edi
+	mov ecx, dword ptr [r15 + 96]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 72], edi
+	mov ecx, dword ptr [r15 + 100]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 75], edi
+	mov ecx, dword ptr [r15 + 104]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 78], edi
+	mov ecx, dword ptr [r15 + 108]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r8d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r8d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r8d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r8d, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, r8d
+	or r12d, eax
+	mov eax, dword ptr [r15 + 112]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov r13d, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov esi, eax
+	shr esi, 14
+	and esi, 1020
+	shr eax, 24
+	or r13d, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r13d, dword ptr [r14 + rsi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r13d, dword ptr [r14 + 4*rax + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 81], r8d
+	mov dword ptr [rbp + 84], r13d
+	mov eax, dword ptr [r15 + 116]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 87], esi
+	mov eax, dword ptr [r15 + 120]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 90], esi
+	mov ecx, dword ptr [r15 + 124]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, eax
+		// src/scalar.rs:352
+		out[45] = bb[0];
+	mov byte ptr [rbp + 93], al
+		// src/scalar.rs:353
+		out[46] = bb[1];
+	mov byte ptr [rbp + 94], ah
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/num/uint_macros.rs:3821
+		unsafe { mem::transmute(self) }
+	shr eax, 16
+		// src/scalar.rs:354
+		out[47] = bb[2];
+	mov byte ptr [rbp + 95], al
+	mov eax, dword ptr [r15 + 128]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:350
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 96], esi
+	mov eax, dword ptr [r15 + 132]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 99], esi
+	mov eax, dword ptr [r15 + 136]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 102], esi
+	mov ecx, dword ptr [r15 + 140]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, eax
+	or r13d, r12d
+	mov ecx, dword ptr [r15 + 144]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r12d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r12d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r12d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r12d, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 105], eax
+	mov dword ptr [rbp + 108], r12d
+	mov eax, dword ptr [r15 + 148]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 111], esi
+	mov eax, dword ptr [r15 + 152]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 114], esi
+	mov eax, dword ptr [r15 + 156]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 117], esi
+	mov eax, dword ptr [r15 + 160]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 120], esi
+	mov eax, dword ptr [r15 + 164]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 123], esi
+	mov eax, dword ptr [r15 + 168]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 126], esi
+	mov eax, dword ptr [r15 + 172]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 129], esi
+	mov ecx, dword ptr [r15 + 176]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, eax
+	or r12d, r13d
+	mov ecx, dword ptr [r15 + 180]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r13d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r13d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r13d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r13d, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 132], eax
+	mov dword ptr [rbp + 135], r13d
+	mov eax, dword ptr [r15 + 184]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 138], esi
+	mov ecx, dword ptr [r15 + 188]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, eax
+		// src/scalar.rs:352
+		out[45] = bb[0];
+	mov byte ptr [rbp + 141], al
+		// src/scalar.rs:353
+		out[46] = bb[1];
+	mov byte ptr [rbp + 142], ah
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/num/uint_macros.rs:3821
+		unsafe { mem::transmute(self) }
+	shr eax, 16
+		// src/scalar.rs:354
+		out[47] = bb[2];
+	mov byte ptr [rbp + 143], al
+	mov eax, dword ptr [r15 + 192]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:350
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 144], esi
+	mov eax, dword ptr [r15 + 196]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 147], esi
+	mov eax, dword ptr [r15 + 200]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 150], esi
+	mov eax, dword ptr [r15 + 204]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 153], esi
+	mov eax, dword ptr [r15 + 208]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 156], esi
+	mov eax, dword ptr [r15 + 212]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 159], esi
+	mov ecx, dword ptr [r15 + 216]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r13d, eax
+	or r13d, r12d
+	mov ecx, dword ptr [r15 + 220]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r12d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r12d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r12d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r12d, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 162], eax
+	mov dword ptr [rbp + 165], r12d
+	mov eax, dword ptr [r15 + 224]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 168], esi
+	mov eax, dword ptr [r15 + 228]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 171], esi
+	mov eax, dword ptr [r15 + 232]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ah
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, eax
+	shr edi, 14
+	and edi, 1020
+	shr eax, 24
+	or esi, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 174], esi
+	mov ecx, dword ptr [r15 + 236]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+	mov ecx, dword ptr [r15 + 240]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r8d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or r8d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r8d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r8d, dword ptr [r14 + 4*rcx + 3072]
+	mov ecx, dword ptr [r15 + 244]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r9d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	or r9d, dword ptr [r14 + 4*rsi]
+	mov esi, ecx
+	shr esi, 14
+	and esi, 1020
+	shr ecx, 24
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r9d, dword ptr [r14 + rsi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r9d, dword ptr [r14 + 4*rcx + 3072]
+	mov ecx, dword ptr [r15 + 248]
+	mov ebx, dword ptr [r15 + 252]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/const_ptr.rs:863
+		unsafe { intrinsics::offset(self, count) }
+	add r15, 256
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, eax
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 177], eax
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, r8d
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 180], r8d
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, r9d
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 183], r9d
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx eax, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ch
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or esi, dword ptr [r14 + 4*rax]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, esi
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, bl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, bh
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ebx
+	shr edi, 14
+	and edi, 1020
+	shr ebx, 24
+	or eax, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rbx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbp + 186], esi
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, eax
+		// src/scalar.rs:350
+		*cu |= u;
+	or r12d, r13d
+		// src/scalar.rs:352
+		out[45] = bb[0];
+	mov byte ptr [rbp + 189], al
+		// src/scalar.rs:353
+		out[46] = bb[1];
+	mov byte ptr [rbp + 190], ah
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/num/uint_macros.rs:3821
+		unsafe { mem::transmute(self) }
+	shr eax, 16
+		// src/scalar.rs:354
+		out[47] = bb[2];
+	mov byte ptr [rbp + 191], al
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/slice/mod.rs:2151
+		if mid <= self.len() {
+	add r11, 4
+	add rbp, 192
+	cmp qword ptr [rsp + 64], r11
+	jne .LBB0_15
+.LBB0_16:
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/iter/adapters/zip.rs:306
+		if self.index < self.len {
+	test rdx, rdx
+	je .LBB0_17
+.LBB0_18:
+	mov rdx, qword ptr [rsp + 48]
+	mov rax, rdx
+	shr rax, 8
+	lea rax, [rax + 2*rax]
+	shl rax, 6
+	mov rcx, qword ptr [rsp + 32]
+	lea rbx, [rax + rcx]
+	add rbx, 47
+	movabs rax, 9223372036854775552
+	and rax, rdx
+	mov rdx, qword ptr [rsp + 8]
+	mov rcx, qword ptr [rsp + 16]
+	lea r10, [rax + rcx]
+	add r10, 60
+	shl edx, 6
+	xor r11d, r11d
+	mov r14, qword ptr [rip + oxid64::scalar::DEC_LUTS@GOTPCREL]
+	mov r13, qword ptr [rsp + 24]
+	.p2align	4
+.LBB0_19:
+	mov eax, dword ptr [r10 + r11 - 60]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx ecx, al
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx ebp, ah
+	mov r8d, dword ptr [r14 + 4*rbp + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r9d, eax
+	shr r9d, 14
+	and r9d, 1020
+	or r8d, dword ptr [r14 + 4*rcx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r8d, dword ptr [r14 + r9 + 2048]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	shr eax, 24
+		// src/scalar.rs:300
+		x0 | x1
+	or r8d, dword ptr [r14 + 4*rax + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, r8d
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 47], r8d
+	mov ecx, dword ptr [r10 + r11 - 56]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx r8d, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r9d, ecx
+	shr r9d, 14
+	and r9d, 1020
+	or eax, dword ptr [r14 + 4*r8]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + r9 + 2048]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	shr ecx, 24
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 44], eax
+	mov ecx, dword ptr [r10 + r11 - 52]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx r8d, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx ebp, ch
+	mov r9d, dword ptr [r14 + 4*rbp + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r15d, ecx
+	shr r15d, 14
+	and r15d, 1020
+	shr ecx, 24
+	or r9d, dword ptr [r14 + 4*r8]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r9d, dword ptr [r14 + r15 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or r9d, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, r9d
+	or eax, r12d
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 41], r9d
+	mov ecx, dword ptr [r10 + r11 - 48]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx r8d, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx ebp, ch
+	mov ebp, dword ptr [r14 + 4*rbp + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r9d, ecx
+	shr r9d, 14
+	and r9d, 1020
+	or ebp, dword ptr [r14 + 4*r8]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or ebp, dword ptr [r14 + r9 + 2048]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	shr ecx, 24
+		// src/scalar.rs:300
+		x0 | x1
+	or ebp, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 38], ebp
+	mov ecx, dword ptr [r10 + r11 - 44]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx r8d, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx esi, ch
+	mov esi, dword ptr [r14 + 4*rsi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r9d, ecx
+	shr r9d, 14
+	and r9d, 1020
+	shr ecx, 24
+	or esi, dword ptr [r14 + 4*r8]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or esi, dword ptr [r14 + r9 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or esi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or ebp, esi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 35], esi
+	mov ecx, dword ptr [r10 + r11 - 40]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or ebp, edi
+	or ebp, eax
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 32], edi
+	mov ecx, dword ptr [r10 + r11 - 36]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	shr ecx, 24
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 29], eax
+	mov ecx, dword ptr [r10 + r11 - 32]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 26], edi
+	mov ecx, dword ptr [r10 + r11 - 28]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 23], edi
+	mov ecx, dword ptr [r10 + r11 - 24]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or eax, edi
+	or eax, ebp
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 20], edi
+	mov ecx, dword ptr [r10 + r11 - 20]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov r12d, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	or r12d, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or r12d, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	shr ecx, 24
+		// src/scalar.rs:300
+		x0 | x1
+	or r12d, dword ptr [r14 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 17], r12d
+	mov ecx, dword ptr [r10 + r11 - 16]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 14], edi
+	mov ecx, dword ptr [r10 + r11 - 12]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 11], edi
+	mov ecx, dword ptr [r10 + r11 - 8]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 8], edi
+	mov ecx, dword ptr [r10 + r11 - 4]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx edi, ch
+	mov edi, dword ptr [r14 + 4*rdi + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov r8d, ecx
+	shr r8d, 14
+	and r8d, 1020
+	shr ecx, 24
+	or edi, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or edi, dword ptr [r14 + r8 + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or edi, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:336
+		*cu |= u;
+	or r12d, edi
+	or r12d, eax
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ptr/mod.rs:547
+		unsafe { crate::intrinsics::copy_nonoverlapping(src, dst, count) }
+	mov dword ptr [rbx - 5], edi
+	mov ecx, dword ptr [r10 + r11]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx esi, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r14 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	or eax, dword ptr [r14 + 4*rsi]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r14 + rdi + 2048]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	shr ecx, 24
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r14 + 4*rcx + 3072]
+		// src/scalar.rs:350
+		*cu |= u;
+	or r12d, eax
+		// src/scalar.rs:352
+		out[45] = bb[0];
+	mov byte ptr [rbx - 2], al
+		// src/scalar.rs:353
+		out[46] = bb[1];
+	mov byte ptr [rbx - 1], ah
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/num/uint_macros.rs:3821
+		unsafe { mem::transmute(self) }
+	shr eax, 16
+		// src/scalar.rs:354
+		out[47] = bb[2];
+	mov byte ptr [rbx], al
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/iter/adapters/zip.rs:306
+		if self.index < self.len {
+	add rbx, 48
+	add r11, 64
+	cmp rdx, r11
+	jne .LBB0_19
+	jmp .LBB0_20
+.LBB0_13:
+	xor r12d, r12d
+	mov rdx, qword ptr [rsp + 8]
+	test rdx, rdx
+	jne .LBB0_18
+.LBB0_17:
+	mov r13, qword ptr [rsp + 24]
+.LBB0_20:
+	mov rbp, qword ptr [rsp + 48]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/slice/mod.rs:1344
+		let new_len = unsafe { exact_div(self.len(), N) };
+	mov r8d, ebp
+	shr r8d, 2
+	and r8d, 15
+		// src/scalar.rs:473
+		let used = rem4.len() * 3;
+	lea r14, [r8 + 2*r8]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/slice/mod.rs:2190
+		if mid <= self.len() {
+	mov rsi, r13
+	sub rsi, r14
+	jb .LBB0_47
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/iter/adapters/zip.rs:306
+		if self.index < self.len {
+	test r8, r8
+	mov r15, qword ptr [rsp + 32]
+	je .LBB0_24
+	movabs r10, 9223372036854775744
+	and r10, rbp
+	add r10, qword ptr [rsp + 16]
+	mov rax, qword ptr [rsp + 40]
+	lea rbx, [rax + r15]
+	add rbx, 2
+	xor r11d, r11d
+	mov r9, qword ptr [rip + oxid64::scalar::DEC_LUTS@GOTPCREL]
+	.p2align	4
+.LBB0_23:
+	mov ecx, dword ptr [r10 + 4*r11]
+		// src/scalar.rs:293
+		let a = (word & 0xFF) as usize;
+	movzx edx, cl
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	movzx eax, ch
+	mov eax, dword ptr [r9 + 4*rax + 1024]
+		// src/scalar.rs:299
+		let x1 = DEC_LUTS.table[c | 512] | DEC_LUTS.table[d | 768];
+	mov edi, ecx
+	shr edi, 14
+	and edi, 1020
+	shr ecx, 24
+	or eax, dword ptr [r9 + 4*rdx]
+		// src/scalar.rs:298
+		let x0 = DEC_LUTS.table[a] | DEC_LUTS.table[b | 256];
+	or eax, dword ptr [r9 + rdi + 2048]
+		// src/scalar.rs:300
+		x0 | x1
+	or eax, dword ptr [r9 + 4*rcx + 3072]
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/iter/adapters/zip.rs:310
+		self.index += 1;
+	inc r11
+		// src/scalar.rs:481
+		cu |= u;
+	or r12d, eax
+		// src/scalar.rs:483
+		dst3[0] = (u & 0xFF) as u8;
+	mov byte ptr [rbx - 2], al
+		// src/scalar.rs:484
+		dst3[1] = ((u >> 8) & 0xFF) as u8;
+	mov byte ptr [rbx - 1], ah
+		// src/scalar.rs:485
+		dst3[2] = ((u >> 16) & 0xFF) as u8;
+	shr eax, 16
+	mov byte ptr [rbx], al
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/iter/adapters/zip.rs:306
+		if self.index < self.len {
+	add rbx, 3
+	cmp r8, r11
+	jne .LBB0_23
+.LBB0_24:
+	add r15, qword ptr [rsp + 40]
+	mov rcx, qword ptr [rsp + 16]
+		// src/scalar.rs:376
+		let a = last4[0];
+	movzx r8d, byte ptr [rcx + rbp]
+		// src/scalar.rs:377
+		let b = last4[1];
+	movzx r9d, byte ptr [rcx + rbp + 1]
+		// src/scalar.rs:378
+		let c = last4[2];
+	movzx eax, byte ptr [rcx + rbp + 2]
+		// src/scalar.rs:379
+		let d = last4[3];
+	movzx ecx, byte ptr [rcx + rbp + 3]
+	cmp rcx, 61
+		// src/scalar.rs:382
+		if d != b'=' {
+	jne .LBB0_29
+	lea rdi, [rip + .Lanon.2b5adade395e75d82432749aeb18603b.5]
+	movzx r10d, byte ptr [r8 + rdi]
+	movzx r8d, byte ptr [r9 + rdi]
+		// src/scalar.rs:394
+		if c != b'=' {
+	cmp eax, 61
+	jne .LBB0_31
+		// src/scalar.rs:414
+		if (v0 | v1) == 0xFF {
+	mov eax, r8d
+	or eax, r10d
+	cmp eax, 255
+	je .LBB0_3
+		// src/scalar.rs:432
+		out[out_off] = tmp[0];
+	cmp r13, r14
+	je .LBB0_34
+		// src/scalar.rs:418
+		let o0 = ((v0 as u32) << 2) | ((v1 as u32) >> 4);
+	shl r10d, 2
+	shr r8b, 4
+	movzx r8d, r8b
+	or r8d, r10d
+		// src/scalar.rs:432
+		out[out_off] = tmp[0];
+	mov byte ptr [r15 + r14], r8b
+		// src/scalar.rs:436
+		if written >= 3 {
+	jmp .LBB0_38
+.LBB0_29:
+		// src/scalar.rs:286
+		let x0 = DEC_LUTS.table[a as usize] | DEC_LUTS.table[(b as usize) | 256];
+	mov rdx, qword ptr [rip + oxid64::scalar::DEC_LUTS@GOTPCREL]
+	mov r9d, dword ptr [rdx + 4*r9 + 1024]
+		// src/scalar.rs:287
+		let x1 = DEC_LUTS.table[(c as usize) | 512] | DEC_LUTS.table[(d as usize) | 768];
+	or r9d, dword ptr [rdx + 4*r8]
+		// src/scalar.rs:286
+		let x0 = DEC_LUTS.table[a as usize] | DEC_LUTS.table[(b as usize) | 256];
+	or r9d, dword ptr [rdx + 4*rax + 2048]
+		// src/scalar.rs:288
+		x0 | x1
+	or r9d, dword ptr [rdx + 4*rcx + 3072]
+		// src/scalar.rs:384
+		if u == INVALID_U32 {
+	cmp r9d, -1
+	je .LBB0_3
+		// src/scalar.rs:388
+		out3[1] = ((u >> 8) & 0xFF) as u8;
+	mov edi, r9d
+	shr edi, 8
+		// src/scalar.rs:389
+		out3[2] = ((u >> 16) & 0xFF) as u8;
+	mov r10d, r9d
+	shr r10d, 16
+	mov r8d, r9d
+	jmp .LBB0_33
+.LBB0_31:
+		// src/scalar.rs:397
+		let v2 = REV64_INIT[c as usize];
+	movzx edi, byte ptr [rax + rdi]
+		// src/scalar.rs:398
+		if (v0 | v1 | v2) == 0xFF {
+	mov eax, r8d
+	or eax, r10d
+	or eax, edi
+	cmp eax, 255
+	je .LBB0_3
+		// src/scalar.rs:402
+		let o0 = ((v0 as u32) << 2) | ((v1 as u32) >> 4);
+	shl r10d, 2
+	mov r9d, r8d
+	shr r9d, 4
+	or r9d, r10d
+		// src/scalar.rs:403
+		let o1 = (((v1 as u32) & 0x0F) << 4) | ((v2 as u32) >> 2);
+	shl r8d, 4
+	movzx eax, r8b
+	shr edi, 2
+	or edi, eax
+		// src/scalar.rs:408
+		return Some((2, o0 | (o1 << 8)));
+	mov r8d, edi
+	shl r8d, 8
+	or r8d, r9d
+	xor r10d, r10d
+.LBB0_33:
+		// src/scalar.rs:432
+		out[out_off] = tmp[0];
+	cmp r13, r14
+	je .LBB0_34
+	mov byte ptr [r15 + r14], r9b
+		// src/scalar.rs:434
+		out[out_off + 1] = tmp[1];
+	cmp rsi, 1
+	je .LBB0_41
+	mov byte ptr [r15 + r14 + 1], dil
+		// src/scalar.rs:382
+		if d != b'=' {
+	cmp ecx, 61
+		// src/scalar.rs:436
+		if written >= 3 {
+	je .LBB0_38
+		// src/scalar.rs:437
+		out[out_off + 2] = tmp[2];
+	cmp rsi, 3
+	jb .LBB0_42
+	mov byte ptr [r15 + r14 + 2], r10b
+.LBB0_38:
+		// src/scalar.rs:494
+		cu |= cu_tail;
+	or r8d, r12d
+		// src/scalar.rs:497
+		if cu == INVALID_U32 {
+	xor eax, eax
+	cmp r8d, -1
+	setne al
+	mov rdx, qword ptr [rsp + 56]
+	jmp .LBB0_39
+.LBB0_44:
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/slice/index.rs:443
+		slice_index_fail(self.start, self.end, slice.len())
+	lea rax, [rip + .Lanon.2b5adade395e75d82432749aeb18603b.8]
+	xor edi, edi
+	mov rdx, rcx
+	mov rcx, rax
+	call qword ptr [rip + core::slice::index::slice_index_fail@GOTPCREL]
+.LBB0_45:
+		// ~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/slice/mod.rs:1986
+		None => panic!("mid > len"),
+	lea rdi, [rip + .Lanon.2b5adade395e75d82432749aeb18603b.0]
+	lea rdx, [rip + .Lanon.2b5adade395e75d82432749aeb18603b.6]
+	mov esi, 19
+	call qword ptr [rip + core::panicking::panic_fmt@GOTPCREL]
+.LBB0_47:
+	lea rdi, [rip + .Lanon.2b5adade395e75d82432749aeb18603b.0]
+	lea rdx, [rip + .Lanon.2b5adade395e75d82432749aeb18603b.7]
+	mov esi, 19
+	call qword ptr [rip + core::panicking::panic_fmt@GOTPCREL]
+.LBB0_34:
+		// src/scalar.rs:432
+		out[out_off] = tmp[0];
+	lea rdx, [rip + .Lanon.2b5adade395e75d82432749aeb18603b.2]
+	xor edi, edi
+	xor esi, esi
+	call qword ptr [rip + core::panicking::panic_bounds_check@GOTPCREL]
+.LBB0_43:
+		// src/scalar.rs:277
+		if pad == 2 && b64[n - 3] == b'=' {
+	lea rdi, [rsi - 3]
+	lea rdx, [rip + .Lanon.2b5adade395e75d82432749aeb18603b.9]
+	call qword ptr [rip + core::panicking::panic_bounds_check@GOTPCREL]
+.LBB0_41:
+		// src/scalar.rs:434
+		out[out_off + 1] = tmp[1];
+	lea rdx, [rip + .Lanon.2b5adade395e75d82432749aeb18603b.3]
+	mov edi, 1
+	mov esi, 1
+	call qword ptr [rip + core::panicking::panic_bounds_check@GOTPCREL]
+.LBB0_42:
+		// src/scalar.rs:437
+		out[out_off + 2] = tmp[2];
+	lea rdx, [rip + .Lanon.2b5adade395e75d82432749aeb18603b.4]
+	mov edi, 2
+	call qword ptr [rip + core::panicking::panic_bounds_check@GOTPCREL]

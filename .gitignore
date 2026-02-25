@@ -1,0 +1,6 @@
+/target
+/Turbo-Base64
+perf.data
+perf.data.old
+test_tb64
+Cargo.lock
