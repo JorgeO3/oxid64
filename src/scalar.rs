@@ -150,8 +150,8 @@ const fn load_u32_be_unaligned(inp: &[u8; 48], i: usize) -> u32 {
     u32::from_be_bytes([inp[i], inp[i + 1], inp[i + 2], inp[i + 3]])
 }
 
-#[inline(always)]
 #[rustfmt::skip]
+#[inline(always)]
 const fn encode_block_48_to_64(inp: &[u8; 48], out: &mut [u8; 64]) {
     // out as 16 fixed 4-byte chunks; the backend lowers this to u32 stores.
     let (out4, rem) = out.as_chunks_mut::<4>();
@@ -323,8 +323,8 @@ fn prefetch_t0_384(p: *const u8) {
     }
 }
 
-#[inline(always)]
 #[rustfmt::skip]
+#[inline(always)]
 fn decode_block_64_to_48(inp: &[u8; 64], out: &mut [u8; 48], cu: &mut u32) {
     let (in4, in4_rem) = inp.as_chunks::<4>();
     debug_assert!(in4_rem.is_empty());
@@ -354,7 +354,6 @@ fn decode_block_64_to_48(inp: &[u8; 64], out: &mut [u8; 48], cu: &mut u32) {
     out[47] = bb[2];
 }
 
-#[inline(always)]
 fn decode_body_blocks_64_to_48(chunks64: &[[u8; 64]], out48: &mut [[u8; 48]], cu: &mut u32) {
     debug_assert_eq!(chunks64.len(), out48.len());
     let mut in4 = chunks64.chunks_exact(4);
@@ -373,26 +372,25 @@ fn decode_body_blocks_64_to_48(chunks64: &[[u8; 64]], out48: &mut [[u8; 48]], cu
 }
 
 #[inline(always)]
-const fn decode_tail(last4: &[u8; 4], out: &mut [u8], out_off: usize) -> Option<(usize, u32)> {
+pub const fn decode_tail_3(last4: &[u8; 4], out3: &mut [u8; 3]) -> Option<(usize, u32)> {
     let a = last4[0];
     let b = last4[1];
     let c = last4[2];
     let d = last4[3];
 
-    // No padding (4 -> 3).
+    // No padding: 4 chars -> 3 bytes
     if d != b'=' {
         let u = du32(a, b, c, d);
         if u == INVALID_U32 {
             return None;
         }
-        let bb = u.to_le_bytes();
-        out[out_off] = bb[0];
-        out[out_off + 1] = bb[1];
-        out[out_off + 2] = bb[2];
+        out3[0] = (u & 0xFF) as u8;
+        out3[1] = ((u >> 8) & 0xFF) as u8;
+        out3[2] = ((u >> 16) & 0xFF) as u8;
         return Some((3, u));
     }
 
-    // One padding (3 -> 2): xxx=
+    // One '=' padding: 3 chars -> 2 bytes
     if c != b'=' {
         let v0 = REV64_INIT[a as usize];
         let v1 = REV64_INIT[b as usize];
@@ -404,12 +402,13 @@ const fn decode_tail(last4: &[u8; 4], out: &mut [u8], out_off: usize) -> Option<
         let o0 = ((v0 as u32) << 2) | ((v1 as u32) >> 4);
         let o1 = (((v1 as u32) & 0x0F) << 4) | ((v2 as u32) >> 2);
 
-        out[out_off] = o0 as u8;
-        out[out_off + 1] = o1 as u8;
+        out3[0] = o0 as u8;
+        out3[1] = o1 as u8;
+        // out3[2] left unspecified
         return Some((2, o0 | (o1 << 8)));
     }
 
-    // Two padding (2 -> 1): xx==
+    // Two '=' padding: 2 chars -> 1 byte
     let v0 = REV64_INIT[a as usize];
     let v1 = REV64_INIT[b as usize];
     if (v0 | v1) == 0xFF {
@@ -417,8 +416,28 @@ const fn decode_tail(last4: &[u8; 4], out: &mut [u8], out_off: usize) -> Option<
     }
 
     let o0 = ((v0 as u32) << 2) | ((v1 as u32) >> 4);
-    out[out_off] = o0 as u8;
+    out3[0] = o0 as u8;
     Some((1, o0))
+}
+
+#[inline(always)]
+pub fn decode_tail(last4: &[u8; 4], out: &mut [u8], out_off: usize) -> Option<(usize, u32)> {
+    // Compute into a fixed 3-byte buffer to avoid bounds-check noise in the hot caller.
+    // Then copy only the bytes we actually wrote.
+    let mut tmp = [0u8; 3];
+    let (written, cu) = decode_tail_3(last4, &mut tmp)?;
+
+    // The caller guarantees capacity (e.g. out is a tail slice of length 1..=3, or larger).
+    // Keep these copies explicit; compiler typically lowers them to byte stores.
+    out[out_off] = tmp[0];
+    if written >= 2 {
+        out[out_off + 1] = tmp[1];
+    }
+    if written >= 3 {
+        out[out_off + 2] = tmp[2];
+    }
+
+    Some((written, cu))
 }
 
 pub fn decode_base64_fast(in_data: &[u8], out_data: &mut [u8]) -> Option<usize> {
@@ -430,7 +449,6 @@ pub fn decode_base64_fast(in_data: &[u8], out_data: &mut [u8]) -> Option<usize> 
         return Some(0);
     }
 
-    // Process everything except final 4 chars with no-padding path.
     let n = in_data.len();
     let body = &in_data[..n - 4];
     let last4: &[u8; 4] = in_data[n - 4..].try_into().ok()?;
@@ -449,23 +467,30 @@ pub fn decode_base64_fast(in_data: &[u8], out_data: &mut [u8]) -> Option<usize> 
     decode_body_blocks_64_to_48(chunks64, out48, &mut cu);
 
     // Remaining body quads (<64 chars).
-    let mut out_off = body_out_len;
     let (rem4, rem4_tail) = rem64.as_chunks::<4>();
     debug_assert!(rem4_tail.is_empty());
-    for quad in rem4 {
+
+    let used = rem4.len() * 3;
+    debug_assert!(used <= out_tail.len());
+
+    let (out_rem, out_tail2) = out_tail.split_at_mut(used);
+    debug_assert_eq!(out_rem.len(), rem4.len() * 3);
+
+    for (quad, dst3) in rem4.iter().zip(out_rem.chunks_exact_mut(3)) {
         let u = du32_u32_le(u32::from_le_bytes(*quad));
         cu |= u;
 
-        let bb = u.to_le_bytes();
-        let o = out_off - body_out_len;
-        out_tail[o] = bb[0];
-        out_tail[o + 1] = bb[1];
-        out_tail[o + 2] = bb[2];
-        out_off += 3;
+        dst3[0] = (u & 0xFF) as u8;
+        dst3[1] = ((u >> 8) & 0xFF) as u8;
+        dst3[2] = ((u >> 16) & 0xFF) as u8;
     }
 
-    // Final quad with padding rules.
-    let (tail_written, cu_tail) = decode_tail(last4, out, out_off)?;
+    // Final tail (1..=3 bytes) on the remaining slice.
+    let mut out_off = body_out_len + used;
+
+    // out_tail2 is exactly the remaining space after writing rem4 (length should be 1..=3).
+    // We call decode_tail with out_off=0 so it can write directly into the tail slice.
+    let (tail_written, cu_tail) = decode_tail(last4, out_tail2, 0)?;
     cu |= cu_tail;
     out_off += tail_written;
 
