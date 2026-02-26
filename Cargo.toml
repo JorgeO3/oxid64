@@ -21,18 +21,8 @@ harness = false
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "fat"
 codegen-units = 1
 debug = "full"
 panic = "abort"
 incremental = false
-
-[[bin]]
-name = "perf_encode_sse"
-path = "src/bin/perf_encode_sse.rs"
-
-
-[[bin]]
-name = "perf_encode_c"
-path = "src/bin/perf_encode_c.rs"
-

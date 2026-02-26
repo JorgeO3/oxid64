@@ -1,10 +1,9 @@
 #![allow(warnings)]
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use oxid64::simd::Base64Decoder;
+use oxid64::simd::avx2::Avx2Decoder;
 use oxid64::simd::scalar::{decode_base64_fast, encode_base64_fast};
 use oxid64::simd::sse42::Sse42Decoder;
-use oxid64::simd::sse42_opt::Sse42OptDecoder;
-use oxid64::simd::avx2::Avx2Decoder;
 
 unsafe extern "C" {
     fn tb64sdec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
@@ -32,7 +31,7 @@ pub fn bench_base64_decode(c: &mut Criterion) {
         let encoded_len = encode_base64_fast(&input, &mut encoded);
         encoded.truncate(encoded_len);
 
-        let mut output = vec![0u8; *size + 64]; // Need padding for overlapping writes
+        let mut output = vec![0u8; *size + 64];
 
         group.bench_with_input(
             BenchmarkId::new("Rust Port (Safe Scalar)", size),
@@ -143,19 +142,6 @@ pub fn bench_base64_encode(c: &mut Criterion) {
         );
 
         group.bench_with_input(
-            BenchmarkId::new("Rust Port (SSSE3 Opt)", size),
-            &input,
-            |b, i| {
-                b.iter(|| {
-                    let _ = Sse42OptDecoder::encode_to_slice(
-                        black_box(i.as_slice()),
-                        black_box(output.as_mut_slice()),
-                    );
-                });
-            },
-        );
-
-        group.bench_with_input(
             BenchmarkId::new("TurboBase64 C (Fast Scalar)", size),
             &input,
             |b, i| {
@@ -204,7 +190,7 @@ pub fn bench_base64_encode(c: &mut Criterion) {
                 b.iter(|| {
                     let _ = Avx2Decoder::encode_to_slice(
                         black_box(i.as_slice()),
-                        black_box(output.as_mut_slice())
+                        black_box(output.as_mut_slice()),
                     );
                 });
             },

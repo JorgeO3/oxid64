@@ -199,6 +199,12 @@ const fn encode_tail_rem2(rem0: u8, rem1: u8, out4: &mut [u8; 4]) {
 }
 
 #[inline(always)]
+pub unsafe fn encode_block_3_to_4_ptr(a: u8, b: u8, c: u8, out: *mut u8) {
+    let x = enc3_lut(a, b, c);
+    unsafe { core::ptr::write_unaligned(out as *mut u32, x.to_le()) };
+}
+
+#[inline(always)]
 fn encode_scalar_tail(in_data: &[u8], out: &mut [u8]) -> usize {
     let needed = encoded_len(in_data.len());
     debug_assert!(out.len() >= needed);
