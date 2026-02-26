@@ -1,6 +1,12 @@
+use oxid64::simd::Base64Decoder;
 use oxid64::simd::scalar::encode_base64_fast;
+use oxid64::simd::sse42::Sse42Decoder;
 use std::hint::black_box;
 use std::time::Instant;
+
+unsafe extern "C" {
+    fn tb64v128enc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+}
 
 fn encoded_len(n: usize) -> usize {
     ((n + 2) / 3) * 4
@@ -24,8 +30,9 @@ fn parse_arg(args: &[String], index: usize, default: usize) -> usize {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let input_size = parse_arg(&args, 1, 1024 * 1024);
-    let iterations = parse_arg(&args, 2, 20_000);
+    let engine = args.get(1).map(|s| s.as_str()).unwrap_or("scalar");
+    let input_size = parse_arg(&args, 2, 1024 * 1024);
+    let iterations = parse_arg(&args, 3, 20_000);
 
     let mut input = vec![0u8; input_size];
     xorshift_fill(&mut input);
@@ -33,24 +40,46 @@ fn main() {
     let mut output = vec![0u8; encoded_len(input_size) + 64];
     let mut checksum = 0u64;
 
-    for _ in 0..256 {
-        let n = encode_base64_fast(black_box(&input), black_box(&mut output));
-        checksum ^= output[0] as u64;
-        checksum ^= output[n - 1] as u64;
-    }
+    let sse_decoder = Sse42Decoder;
 
     let start = Instant::now();
-    for _ in 0..iterations {
-        let n = encode_base64_fast(black_box(&input), black_box(&mut output));
-        checksum ^= output[0] as u64;
-        checksum ^= output[n - 1] as u64;
+    match engine {
+        "scalar" => {
+            for _ in 0..iterations {
+                let n = encode_base64_fast(black_box(&input), black_box(&mut output));
+                checksum ^= output[0] as u64;
+                checksum ^= output[n - 1] as u64;
+            }
+        }
+        "ssse3" => {
+            for _ in 0..iterations {
+                let out = sse_decoder.encode(black_box(&input));
+                let out = black_box(out);
+                checksum ^= out[0] as u64;
+                checksum ^= out[out.len() - 1] as u64;
+            }
+        }
+        "c_sse" => {
+            for _ in 0..iterations {
+                let n = unsafe {
+                    tb64v128enc(
+                        black_box(input.as_ptr()),
+                        black_box(input.len()),
+                        black_box(output.as_mut_ptr()),
+                    )
+                };
+                checksum ^= output[0] as u64;
+                checksum ^= output[n - 1] as u64;
+            }
+        }
+        _ => panic!("Unknown engine"),
     }
     let elapsed = start.elapsed();
 
     let bytes_total = input_size as f64 * iterations as f64;
     let gib_per_s = bytes_total / elapsed.as_secs_f64() / (1024.0 * 1024.0 * 1024.0);
 
-    println!("input_size={input_size} iterations={iterations}");
+    println!("engine={engine} input_size={input_size} iterations={iterations}");
     println!(
         "elapsed={:.3}s throughput={:.3} GiB/s",
         elapsed.as_secs_f64(),

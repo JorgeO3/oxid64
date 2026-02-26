@@ -176,7 +176,7 @@ const fn encode_block_48_to_64(inp: &[u8; 48], out: &mut [u8; 64]) {
 }
 
 #[inline(always)]
-fn encode_tail_rem1(rem0: u8, out4: &mut [u8; 4]) {
+const fn encode_tail_rem1(rem0: u8, out4: &mut [u8; 4]) {
     let idx = idx1_from_abc(rem0, 0);
     let p = TB64LUT_LE.0[idx].to_le_bytes();
     out4[0] = p[0];
@@ -186,7 +186,7 @@ fn encode_tail_rem1(rem0: u8, out4: &mut [u8; 4]) {
 }
 
 #[inline(always)]
-fn encode_tail_rem2(rem0: u8, rem1: u8, out4: &mut [u8; 4]) {
+const fn encode_tail_rem2(rem0: u8, rem1: u8, out4: &mut [u8; 4]) {
     let idx1 = idx1_from_abc(rem0, rem1);
     let idx2 = idx2_from_abc(rem1, 0);
     let p1 = TB64LUT_LE.0[idx1].to_le_bytes();

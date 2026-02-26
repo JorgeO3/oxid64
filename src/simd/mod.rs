@@ -3,6 +3,7 @@ pub mod avx512;
 pub mod neon;
 pub mod scalar;
 pub mod sse42;
+pub mod sse42_opt;
 
 use avx2::Avx2Decoder;
 use avx512::Avx512Decoder;
@@ -10,11 +11,13 @@ use enum_dispatch::enum_dispatch;
 use neon::NeonDecoder;
 use scalar::ScalarDecoder;
 use sse42::Sse42Decoder;
+use sse42_opt::Sse42OptDecoder;
 
 #[enum_dispatch]
 pub enum Decoder {
     ScalarDecoder,
     Sse42Decoder,
+    Sse42OptDecoder,
     NeonDecoder,
     Avx2Decoder,
     Avx512Decoder,
