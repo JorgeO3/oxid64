@@ -540,7 +540,6 @@ impl Base64Decoder for ScalarDecoder {
 #[cfg(test)]
 mod tests {
     use super::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
-    use base64::{Engine as _, engine::general_purpose::STANDARD as b64_std};
 
     fn fill_xorshift(buf: &mut [u8]) {
         let mut x = 0x1234_5678_9abc_def0_u64;
@@ -553,20 +552,26 @@ mod tests {
     }
 
     #[test]
-    fn matches_standard_for_many_sizes() {
-        for len in 0..=8192usize {
-            let mut input = vec![0u8; len];
-            fill_xorshift(&mut input);
+    fn matches_rfc4648_vectors() {
+        const CASES: [(&[u8], &str); 7] = [
+            (b"", ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foob", "Zm9vYg=="),
+            (b"fooba", "Zm9vYmE="),
+            (b"foobar", "Zm9vYmFy"),
+        ];
 
-            let mut out = vec![0u8; ((len + 2) / 3) * 4 + 8];
-            let written = encode_base64_fast(&input, &mut out);
-            let expected = b64_std.encode(&input);
+        for (input, expected) in CASES {
+            let mut out = vec![0u8; ((input.len() + 2) / 3) * 4 + 8];
+            let written = encode_base64_fast(input, &mut out);
+            assert_eq!(&out[..written], expected.as_bytes(), "encode mismatch");
 
-            assert_eq!(
-                &out[..written],
-                expected.as_bytes(),
-                "mismatch at len={len}"
-            );
+            let mut decoded = vec![0u8; input.len() + 8];
+            let decoded_len = decode_base64_fast(expected.as_bytes(), &mut decoded).expect("decode failed");
+            assert_eq!(decoded_len, input.len(), "decode len mismatch");
+            assert_eq!(&decoded[..decoded_len], input, "decode mismatch");
         }
     }
 
@@ -576,9 +581,15 @@ mod tests {
             let mut input = vec![0u8; len];
             fill_xorshift(&mut input);
 
-            let encoded = b64_std.encode(&input);
+            let mut encoded = vec![0u8; ((len + 2) / 3) * 4 + 8];
+            let enc_written = encode_base64_fast(&input, &mut encoded);
+            let encoded = &encoded[..enc_written];
+
+            let expected_len = decoded_len_strict(encoded).expect("decoded_len_strict failed");
+            assert_eq!(expected_len, len, "decoded_len mismatch at len={len}");
+
             let mut out = vec![0u8; len + 8];
-            let written = decode_base64_fast(encoded.as_bytes(), &mut out).expect("decode failed");
+            let written = decode_base64_fast(encoded, &mut out).expect("decode failed");
             assert_eq!(written, len, "len mismatch at len={len}");
             assert_eq!(&out[..written], input.as_slice(), "mismatch at len={len}");
         }

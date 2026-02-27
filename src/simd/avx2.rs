@@ -85,8 +85,8 @@ mod avx2_engine {
     #[target_feature(enable = "avx2")]
     unsafe fn process_block_avx2(mut v: __m256i) -> __m256i {
         let shuf = _mm256_set_epi8(
-            10, 11, 9, 10, 7, 8, 6, 7, 4, 5, 3, 4, 1, 2, 0, 1,
-            10, 11, 9, 10, 7, 8, 6, 7, 4, 5, 3, 4, 1, 2, 0, 1
+            10, 11, 9, 10, 7, 8, 6, 7, 4, 5, 3, 4, 1, 2, 0, 1, 10, 11, 9, 10, 7, 8, 6, 7, 4, 5, 3,
+            4, 1, 2, 0, 1,
         );
         v = _mm256_shuffle_epi8(v, shuf);
 
@@ -101,15 +101,15 @@ mod avx2_engine {
         t1 = fast_vpmullw(t1, mullo);
 
         v = _mm256_or_si256(t0, t1);
-        
+
         let offsets = _mm256_set_epi8(
-            0, 0, -16, -19, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, 71, 65,
-            0, 0, -16, -19, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, 71, 65
+            0, 0, -16, -19, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, 71, 65, 0, 0, -16, -19, -4, -4,
+            -4, -4, -4, -4, -4, -4, -4, -4, 71, 65,
         );
 
         let mut vidx = _mm256_subs_epu8(v, _mm256_set1_epi8(51));
         vidx = _mm256_sub_epi8(vidx, _mm256_cmpgt_epi8(v, _mm256_set1_epi8(25)));
-        
+
         let translated_offset = _mm256_shuffle_epi8(offsets, vidx);
         _mm256_add_epi8(v, translated_offset)
     }
@@ -132,42 +132,74 @@ mod avx2_engine {
             let unroll_limit = in_data.len() - 248;
 
             let mut u0_128 = _mm_loadu_si128(in_data.as_ptr() as *const __m128i);
-            let mut u0 = _mm256_inserti128_si256(_mm256_castsi128_si256(u0_128), _mm_loadu_si128(in_data.as_ptr().add(12) as *const __m128i), 1);
-            
+            let mut u0 = _mm256_inserti128_si256(
+                _mm256_castsi128_si256(u0_128),
+                _mm_loadu_si128(in_data.as_ptr().add(12) as *const __m128i),
+                1,
+            );
+
             let mut u1_128 = _mm_loadu_si128(in_data.as_ptr().add(24) as *const __m128i);
-            let mut u1 = _mm256_inserti128_si256(_mm256_castsi128_si256(u1_128), _mm_loadu_si128(in_data.as_ptr().add(36) as *const __m128i), 1);
-            
+            let mut u1 = _mm256_inserti128_si256(
+                _mm256_castsi128_si256(u1_128),
+                _mm_loadu_si128(in_data.as_ptr().add(36) as *const __m128i),
+                1,
+            );
+
             while in_idx <= unroll_limit {
                 let ip = in_data.as_ptr().add(in_idx);
                 let op = out_data.as_mut_ptr().add(out_idx);
 
                 let mut v0_128 = _mm_loadu_si128(ip.add(48) as *const __m128i);
-                let mut v0 = _mm256_inserti128_si256(_mm256_castsi128_si256(v0_128), _mm_loadu_si128(ip.add(60) as *const __m128i), 1);
-                
+                let mut v0 = _mm256_inserti128_si256(
+                    _mm256_castsi128_si256(v0_128),
+                    _mm_loadu_si128(ip.add(60) as *const __m128i),
+                    1,
+                );
+
                 let mut v1_128 = _mm_loadu_si128(ip.add(72) as *const __m128i);
-                let mut v1 = _mm256_inserti128_si256(_mm256_castsi128_si256(v1_128), _mm_loadu_si128(ip.add(84) as *const __m128i), 1);
-                
+                let mut v1 = _mm256_inserti128_si256(
+                    _mm256_castsi128_si256(v1_128),
+                    _mm_loadu_si128(ip.add(84) as *const __m128i),
+                    1,
+                );
+
                 u0 = process_block_avx2(u0);
                 u1 = process_block_avx2(u1);
                 _mm256_storeu_si256(op as *mut __m256i, u0);
                 _mm256_storeu_si256(op.add(32) as *mut __m256i, u1);
 
                 u0_128 = _mm_loadu_si128(ip.add(96) as *const __m128i);
-                u0 = _mm256_inserti128_si256(_mm256_castsi128_si256(u0_128), _mm_loadu_si128(ip.add(108) as *const __m128i), 1);
-                
+                u0 = _mm256_inserti128_si256(
+                    _mm256_castsi128_si256(u0_128),
+                    _mm_loadu_si128(ip.add(108) as *const __m128i),
+                    1,
+                );
+
                 u1_128 = _mm_loadu_si128(ip.add(120) as *const __m128i);
-                u1 = _mm256_inserti128_si256(_mm256_castsi128_si256(u1_128), _mm_loadu_si128(ip.add(132) as *const __m128i), 1);
-                
+                u1 = _mm256_inserti128_si256(
+                    _mm256_castsi128_si256(u1_128),
+                    _mm_loadu_si128(ip.add(132) as *const __m128i),
+                    1,
+                );
+
                 v0 = process_block_avx2(v0);
                 v1 = process_block_avx2(v1);
                 _mm256_storeu_si256(op.add(64) as *mut __m256i, v0);
                 _mm256_storeu_si256(op.add(96) as *mut __m256i, v1);
 
                 v0_128 = _mm_loadu_si128(ip.add(144) as *const __m128i);
-                v0 = _mm256_inserti128_si256(_mm256_castsi128_si256(v0_128), _mm_loadu_si128(ip.add(156) as *const __m128i), 1);
-                
+                v0 = _mm256_inserti128_si256(
+                    _mm256_castsi128_si256(v0_128),
+                    _mm_loadu_si128(ip.add(156) as *const __m128i),
+                    1,
+                );
+
                 v1_128 = _mm_loadu_si128(ip.add(168) as *const __m128i);
-                v1 = _mm256_inserti128_si256(_mm256_castsi128_si256(v1_128), _mm_loadu_si128(ip.add(180) as *const __m128i), 1);
+                v1 = _mm256_inserti128_si256(
+                    _mm256_castsi128_si256(v1_128),
+                    _mm_loadu_si128(ip.add(180) as *const __m128i),
+                    1,
+                );
 
                 u0 = process_block_avx2(u0);
                 u1 = process_block_avx2(u1);
@@ -175,10 +207,18 @@ mod avx2_engine {
                 _mm256_storeu_si256(op.add(160) as *mut __m256i, u1);
 
                 u0_128 = _mm_loadu_si128(ip.add(192) as *const __m128i);
-                u0 = _mm256_inserti128_si256(_mm256_castsi128_si256(u0_128), _mm_loadu_si128(ip.add(204) as *const __m128i), 1);
-                
+                u0 = _mm256_inserti128_si256(
+                    _mm256_castsi128_si256(u0_128),
+                    _mm_loadu_si128(ip.add(204) as *const __m128i),
+                    1,
+                );
+
                 u1_128 = _mm_loadu_si128(ip.add(216) as *const __m128i);
-                u1 = _mm256_inserti128_si256(_mm256_castsi128_si256(u1_128), _mm_loadu_si128(ip.add(228) as *const __m128i), 1);
+                u1 = _mm256_inserti128_si256(
+                    _mm256_castsi128_si256(u1_128),
+                    _mm_loadu_si128(ip.add(228) as *const __m128i),
+                    1,
+                );
 
                 v0 = process_block_avx2(v0);
                 v1 = process_block_avx2(v1);
@@ -195,7 +235,11 @@ mod avx2_engine {
             let out_ptr = out_data.as_mut_ptr().add(out_idx);
 
             let v_128 = _mm_loadu_si128(in_ptr as *const __m128i);
-            let v = _mm256_inserti128_si256(_mm256_castsi128_si256(v_128), _mm_loadu_si128(in_ptr.add(12) as *const __m128i), 1);
+            let v = _mm256_inserti128_si256(
+                _mm256_castsi128_si256(v_128),
+                _mm_loadu_si128(in_ptr.add(12) as *const __m128i),
+                1,
+            );
 
             let o0 = process_block_avx2(v);
 

@@ -1,14 +1,30 @@
 #![allow(warnings)]
+use base64_turbo::STANDARD as BASE64_TURBO_STANDARD;
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use oxid64::simd::Base64Decoder;
 use oxid64::simd::avx2::Avx2Decoder;
-use oxid64::simd::scalar::{decode_base64_fast, encode_base64_fast};
-use oxid64::simd::sse42::Sse42Decoder;
+use oxid64::simd::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
+use oxid64::simd::ssse3::Ssse3Decoder;
+use oxid64::simd::ssse3_cstyle::{
+    Ssse3CStyleDecoder, Ssse3CStyleStrictArithDecoder, Ssse3CStyleStrictDecoder,
+    Ssse3CStyleStrictRangeDecoder,
+};
+use oxid64::simd::ssse3_cstyle_experiments::{
+    Ssse3CStyleStrictSse41ArithCheckDecoder, Ssse3CStyleStrictSse41PtestMaskDecoder,
+    Ssse3CStyleStrictSse41PtestNoMaskDecoder,
+};
+use oxid64::simd::ssse3_cstyle_experiments_hybrid::{
+    Ssse3CStyleStrictSse41HybridBucketDecoder, Ssse3CStyleStrictSse41ResynthA3Decoder,
+    Ssse3CStyleStrictSse41ResynthA3SingleDecoder, Ssse3CStyleStrictSse41ResynthAdd4Decoder,
+    Ssse3CStyleStrictSse41ResynthSharedBit6Decoder,
+    Ssse3CStyleStrictSse42PcmpestrmDecoder,
+};
 
 unsafe extern "C" {
     fn tb64sdec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64xdec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64v128dec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+    fn tb64v128dec_b64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+    fn tb64v128dec_nb64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
 
     fn tb64senc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64xenc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
@@ -18,7 +34,6 @@ unsafe extern "C" {
 
 pub fn bench_base64_decode(c: &mut Criterion) {
     let mut group = c.benchmark_group("Base64 Decoding");
-    let sse_decoder = Sse42Decoder;
 
     for size in [1024, 1024 * 1024].iter() {
         group.throughput(Throughput::Bytes(*size as u64));
@@ -30,8 +45,9 @@ pub fn bench_base64_decode(c: &mut Criterion) {
         let mut encoded = vec![0u8; ((size + 2) / 3) * 4 + 64];
         let encoded_len = encode_base64_fast(&input, &mut encoded);
         encoded.truncate(encoded_len);
+        let decoded_len = decoded_len_strict(&encoded).unwrap();
 
-        let mut output = vec![0u8; *size + 64];
+        let mut output = vec![0u8; decoded_len + 64];
 
         group.bench_with_input(
             BenchmarkId::new("Rust Port (Safe Scalar)", size),
@@ -51,10 +67,253 @@ pub fn bench_base64_decode(c: &mut Criterion) {
             &encoded,
             |b, i| {
                 b.iter(|| {
-                    let _ = sse_decoder.decode(black_box(i.as_slice()));
+                    let _ = Ssse3Decoder::decode_to_slice(
+                        black_box(i.as_slice()),
+                        black_box(output.as_mut_slice()),
+                    );
                 });
             },
         );
+
+        group.bench_with_input(
+            BenchmarkId::new("Rust Port (SSSE3, C-Style)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| {
+                    let _ = Ssse3CStyleDecoder::decode_to_slice(
+                        black_box(i.as_slice()),
+                        black_box(output.as_mut_slice()),
+                    );
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("Rust Port (SSSE3, C-Style Strict)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| {
+                    let _ = Ssse3CStyleStrictDecoder::decode_to_slice(
+                        black_box(i.as_slice()),
+                        black_box(output.as_mut_slice()),
+                    );
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("Rust Port (SSSE3, C-Style Strict Range)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| {
+                    let _ = Ssse3CStyleStrictRangeDecoder::decode_to_slice(
+                        black_box(i.as_slice()),
+                        black_box(output.as_mut_slice()),
+                    );
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("Rust Port (SSSE3, C-Style Strict Arith)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| {
+                    let _ = Ssse3CStyleStrictArithDecoder::decode_to_slice(
+                        black_box(i.as_slice()),
+                        black_box(output.as_mut_slice()),
+                    );
+                });
+            },
+        );
+
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        if std::arch::is_x86_feature_detected!("sse4.1") {
+            group.bench_with_input(
+                BenchmarkId::new("Rust Port (SSSE3+SSE4.1, C-Style Strict Resynth A3)", size),
+                &encoded,
+                |b, i| {
+                    b.iter(|| {
+                        let _ = Ssse3CStyleStrictSse41ResynthA3Decoder::decode_to_slice(
+                            black_box(i.as_slice()),
+                            black_box(output.as_mut_slice()),
+                        );
+                    });
+                },
+            );
+
+            group.bench_with_input(
+                BenchmarkId::new(
+                    "Rust Port (SSSE3+SSE4.1, C-Style Strict Resynth Add4)",
+                    size,
+                ),
+                &encoded,
+                |b, i| {
+                    b.iter(|| {
+                        let _ = Ssse3CStyleStrictSse41ResynthAdd4Decoder::decode_to_slice(
+                            black_box(i.as_slice()),
+                            black_box(output.as_mut_slice()),
+                        );
+                    });
+                },
+            );
+
+            group.bench_with_input(
+                BenchmarkId::new(
+                    "Rust Port (SSSE3+SSE4.1, C-Style Strict Resynth A3 Single)",
+                    size,
+                ),
+                &encoded,
+                |b, i| {
+                    b.iter(|| {
+                        let _ = Ssse3CStyleStrictSse41ResynthA3SingleDecoder::decode_to_slice(
+                            black_box(i.as_slice()),
+                            black_box(output.as_mut_slice()),
+                        );
+                    });
+                },
+            );
+
+            group.bench_with_input(
+                BenchmarkId::new(
+                    "Rust Port (SSSE3+SSE4.1, C-Style Strict Resynth Shared Bit6)",
+                    size,
+                ),
+                &encoded,
+                |b, i| {
+                    b.iter(|| {
+                        let _ = Ssse3CStyleStrictSse41ResynthSharedBit6Decoder::decode_to_slice(
+                            black_box(i.as_slice()),
+                            black_box(output.as_mut_slice()),
+                        );
+                    });
+                },
+            );
+
+            group.bench_with_input(
+                BenchmarkId::new(
+                    "Rust Port (SSSE3+SSE4.1, C-Style Strict Hybrid Buckets)",
+                    size,
+                ),
+                &encoded,
+                |b, i| {
+                    b.iter(|| {
+                        let _ = Ssse3CStyleStrictSse41HybridBucketDecoder::decode_to_slice(
+                            black_box(i.as_slice()),
+                            black_box(output.as_mut_slice()),
+                        );
+                    });
+                },
+            );
+
+            group.bench_with_input(
+                BenchmarkId::new("Rust Port (SSSE3+SSE4.1, C-Style Strict Arith Check)", size),
+                &encoded,
+                |b, i| {
+                    b.iter(|| {
+                        let _ = Ssse3CStyleStrictSse41ArithCheckDecoder::decode_to_slice(
+                            black_box(i.as_slice()),
+                            black_box(output.as_mut_slice()),
+                        );
+                    });
+                },
+            );
+
+            group.bench_with_input(
+                BenchmarkId::new("Rust Port (SSSE3+SSE4.1, C-Style Strict PTEST Mask)", size),
+                &encoded,
+                |b, i| {
+                    b.iter(|| {
+                        let _ = Ssse3CStyleStrictSse41PtestMaskDecoder::decode_to_slice(
+                            black_box(i.as_slice()),
+                            black_box(output.as_mut_slice()),
+                        );
+                    });
+                },
+            );
+
+            group.bench_with_input(
+                BenchmarkId::new(
+                    "Rust Port (SSSE3+SSE4.1, C-Style Strict PTEST NoMask)",
+                    size,
+                ),
+                &encoded,
+                |b, i| {
+                    b.iter(|| {
+                        let _ = Ssse3CStyleStrictSse41PtestNoMaskDecoder::decode_to_slice(
+                            black_box(i.as_slice()),
+                            black_box(output.as_mut_slice()),
+                        );
+                    });
+                },
+            );
+        }
+
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        if std::arch::is_x86_feature_detected!("sse4.2") {
+            group.bench_with_input(
+                BenchmarkId::new("Rust Port (SSSE3+SSE4.2, C-Style Strict PCMPESTRM)", size),
+                &encoded,
+                |b, i| {
+                    b.iter(|| {
+                        let _ = Ssse3CStyleStrictSse42PcmpestrmDecoder::decode_to_slice(
+                            black_box(i.as_slice()),
+                            black_box(output.as_mut_slice()),
+                        );
+                    });
+                },
+            );
+        }
+
+        group.bench_with_input(
+            BenchmarkId::new("base64-turbo (decode_into)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| {
+                    let _ = BASE64_TURBO_STANDARD
+                        .decode_into(black_box(i.as_slice()), black_box(output.as_mut_slice()));
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("base64-turbo (unsafe decode_scalar)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| unsafe {
+                    let _ = BASE64_TURBO_STANDARD
+                        .decode_scalar(black_box(i.as_slice()), black_box(output.as_mut_slice()));
+                });
+            },
+        );
+
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        if std::arch::is_x86_feature_detected!("sse4.1") {
+            group.bench_with_input(
+                BenchmarkId::new("base64-turbo (unsafe decode_sse4)", size),
+                &encoded,
+                |b, i| {
+                    b.iter(|| unsafe {
+                        let _ = BASE64_TURBO_STANDARD
+                            .decode_sse4(black_box(i.as_slice()), black_box(output.as_mut_slice()));
+                    });
+                },
+            );
+        }
+
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        if std::arch::is_x86_feature_detected!("avx2") {
+            group.bench_with_input(
+                BenchmarkId::new("base64-turbo (unsafe decode_avx2)", size),
+                &encoded,
+                |b, i| {
+                    b.iter(|| unsafe {
+                        let _ = BASE64_TURBO_STANDARD
+                            .decode_avx2(black_box(i.as_slice()), black_box(output.as_mut_slice()));
+                    });
+                },
+            );
+        }
 
         group.bench_with_input(
             BenchmarkId::new("TurboBase64 C (Fast Scalar)", size),
@@ -97,13 +356,41 @@ pub fn bench_base64_decode(c: &mut Criterion) {
                 });
             },
         );
+
+        group.bench_with_input(
+            BenchmarkId::new("TurboBase64 C (SSE, B64CHECK)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| unsafe {
+                    tb64v128dec_b64check(
+                        black_box(i.as_ptr()),
+                        black_box(i.len()),
+                        black_box(output.as_mut_ptr()),
+                    );
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("TurboBase64 C (SSE, NB64CHECK)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| unsafe {
+                    tb64v128dec_nb64check(
+                        black_box(i.as_ptr()),
+                        black_box(i.len()),
+                        black_box(output.as_mut_ptr()),
+                    );
+                });
+            },
+        );
     }
     group.finish();
 }
 
 pub fn bench_base64_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("Base64 Encoding");
-    let sse_encoder = Sse42Decoder;
+    let sse_encoder = Ssse3Decoder;
 
     for size in [1024, 1024 * 1024].iter() {
         group.throughput(Throughput::Bytes(*size as u64));
@@ -133,7 +420,7 @@ pub fn bench_base64_encode(c: &mut Criterion) {
             &input,
             |b, i| {
                 b.iter(|| {
-                    let _ = Sse42Decoder::encode_to_slice(
+                    let _ = Ssse3Decoder::encode_to_slice(
                         black_box(i.as_slice()),
                         black_box(output.as_mut_slice()),
                     );

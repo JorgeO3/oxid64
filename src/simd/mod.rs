@@ -2,19 +2,22 @@ pub mod avx2;
 pub mod avx512;
 pub mod neon;
 pub mod scalar;
-pub mod sse42;
+pub mod ssse3;
+pub mod ssse3_cstyle;
+pub mod ssse3_cstyle_experiments;
+pub mod ssse3_cstyle_experiments_hybrid;
 
 use avx2::Avx2Decoder;
 use avx512::Avx512Decoder;
 use enum_dispatch::enum_dispatch;
 use neon::NeonDecoder;
 use scalar::ScalarDecoder;
-use sse42::Sse42Decoder;
+use ssse3::Ssse3Decoder;
 
 #[enum_dispatch]
 pub enum Decoder {
     ScalarDecoder,
-    Sse42Decoder,
+    Ssse3Decoder,
     NeonDecoder,
     Avx2Decoder,
     Avx512Decoder,
@@ -39,7 +42,7 @@ pub fn select_best_decoder() -> Decoder {
             return Avx2Decoder.into();
         }
         if std::arch::is_x86_feature_detected!("sse4.2") {
-            return Sse42Decoder.into();
+            return Ssse3Decoder.into();
         }
     }
 

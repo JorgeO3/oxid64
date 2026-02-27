@@ -1,6 +1,6 @@
 use oxid64::simd::Base64Decoder;
 use oxid64::simd::scalar::encode_base64_fast;
-use oxid64::simd::sse42::Sse42Decoder;
+use oxid64::simd::ssse3::Ssse3Decoder;
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -40,7 +40,7 @@ fn main() {
     let mut output = vec![0u8; encoded_len(input_size) + 64];
     let mut checksum = 0u64;
 
-    let sse_decoder = Sse42Decoder;
+    let sse_decoder = Ssse3Decoder;
 
     let start = Instant::now();
     match engine {
