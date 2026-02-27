@@ -4,8 +4,6 @@ pub mod neon;
 pub mod scalar;
 pub mod ssse3;
 pub mod ssse3_cstyle;
-pub mod ssse3_cstyle_experiments;
-pub mod ssse3_cstyle_experiments_hybrid;
 
 use avx2::Avx2Decoder;
 use avx512::Avx512Decoder;
