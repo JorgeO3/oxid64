@@ -3,7 +3,6 @@ pub mod avx512;
 pub mod neon;
 pub mod scalar;
 pub mod ssse3;
-pub mod ssse3_cstyle;
 
 use avx2::Avx2Decoder;
 use avx512::Avx512Decoder;
@@ -40,7 +39,7 @@ pub fn select_best_decoder() -> Decoder {
             return Avx2Decoder.into();
         }
         if std::arch::is_x86_feature_detected!("sse4.2") {
-            return Ssse3Decoder.into();
+            return Ssse3Decoder::new().into();
         }
     }
 

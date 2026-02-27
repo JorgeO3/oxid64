@@ -3,8 +3,7 @@ use base64_turbo::STANDARD as BASE64_TURBO_STANDARD;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use oxid64::simd::avx2::Avx2Decoder;
 use oxid64::simd::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
-use oxid64::simd::ssse3::Ssse3Decoder;
-use oxid64::simd::ssse3_cstyle::{Ssse3CStyleDecoder, Ssse3CStyleStrictDecoder};
+use oxid64::simd::ssse3::{DecodeOpts, Ssse3Decoder};
 
 unsafe extern "C" {
     fn tb64sdec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
@@ -53,37 +52,22 @@ pub fn bench_base64_decode(c: &mut Criterion) {
             BenchmarkId::new("Rust Port (SSSE3)", size),
             &encoded,
             |b, i| {
+                let decoder = Ssse3Decoder::with_opts(DecodeOpts { strict: false });
                 b.iter(|| {
-                    let _ = Ssse3Decoder::decode_to_slice(
-                        black_box(i.as_slice()),
-                        black_box(output.as_mut_slice()),
-                    );
+                    let _ = decoder
+                        .decode_to_slice(black_box(i.as_slice()), black_box(output.as_mut_slice()));
                 });
             },
         );
 
         group.bench_with_input(
-            BenchmarkId::new("Rust Port (SSSE3, C-Style)", size),
+            BenchmarkId::new("Rust Port (SSSE3 Strict)", size),
             &encoded,
             |b, i| {
+                let decoder = Ssse3Decoder::new();
                 b.iter(|| {
-                    let _ = Ssse3CStyleDecoder::decode_to_slice(
-                        black_box(i.as_slice()),
-                        black_box(output.as_mut_slice()),
-                    );
-                });
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("Rust Port (SSSE3, C-Style Strict)", size),
-            &encoded,
-            |b, i| {
-                b.iter(|| {
-                    let _ = Ssse3CStyleStrictDecoder::decode_to_slice(
-                        black_box(i.as_slice()),
-                        black_box(output.as_mut_slice()),
-                    );
+                    let _ = decoder
+                        .decode_to_slice(black_box(i.as_slice()), black_box(output.as_mut_slice()));
                 });
             },
         );
@@ -213,7 +197,7 @@ pub fn bench_base64_decode(c: &mut Criterion) {
 
 pub fn bench_base64_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("Base64 Encoding");
-    let sse_encoder = Ssse3Decoder;
+    let sse_encoder = Ssse3Decoder::new();
 
     for size in [1024, 1024 * 1024].iter() {
         group.throughput(Throughput::Bytes(*size as u64));
