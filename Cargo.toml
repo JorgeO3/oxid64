@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 base64-turbo = { version = "0.1.6", features = ["unstable"] }
 bitflags = "2.11.0"
-enum_dispatch = "0.3.13"
 
 [dev-dependencies]
 proptest = "1.4"

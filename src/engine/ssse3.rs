@@ -36,13 +36,17 @@
 //!
 //! # Encoder
 //!
-//! [`Ssse3Decoder::encode_to_slice`] is a static (associated) function that
-//! encodes raw bytes to Base64 ASCII using SSSE3 vectorised bit-manipulation,
-//! falling back to scalar for the tail. The encoder is independent of
-//! [`DecodeOpts`].
+//! [`Ssse3Decoder::encode_to_slice`] encodes raw bytes to Base64 ASCII using
+//! SSSE3 vectorised bit-manipulation, falling back to scalar for the tail.
+//! The encoder is independent of [`DecodeOpts`].
 
-use super::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
+use super::scalar::{decode_base64_fast, encode_base64_fast};
 use super::Base64Decoder;
+
+#[cfg(target_arch = "x86")]
+use core::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::*;
 
 /// Decoder configuration options.
 ///
@@ -54,7 +58,7 @@ use super::Base64Decoder;
 /// validates every input byte. This is the safe choice for untrusted input.
 ///
 /// ```
-/// # use oxid64::simd::ssse3::DecodeOpts;
+/// # use oxid64::engine::ssse3::DecodeOpts;
 /// let opts = DecodeOpts::default();
 /// assert!(opts.strict);
 /// ```
@@ -102,46 +106,39 @@ impl Ssse3Decoder {
     /// Decode Base64 `input` into `out`, returning the number of bytes written.
     ///
     /// Dispatches to the strict or non-strict SSSE3 engine based on
-    /// `self.opts.strict`, falling back to scalar for the tail (and for
-    /// non-x86 targets).
+    /// `self.opts.strict`, falling back to scalar for the tail.
     ///
     /// Returns `None` if the input contains invalid Base64 characters.
     #[inline]
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        {
-            if std::is_x86_feature_detected!("ssse3") {
-                let engine_fn = if self.opts.strict {
-                    decode_engine::decode_ssse3_strict
-                        as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
-                } else {
-                    decode_engine::decode_ssse3
-                        as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
-                };
-                return dispatch_decode(input, out, engine_fn);
-            }
+        if std::is_x86_feature_detected!("ssse3") {
+            let engine_fn = if self.opts.strict {
+                decode_engine::decode_ssse3_strict
+                    as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
+            } else {
+                decode_engine::decode_ssse3 as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
+            };
+            return dispatch_decode(input, out, engine_fn);
         }
 
         decode_base64_fast(input, out)
     }
 
     /// Encode raw bytes to Base64 ASCII, returning the number of bytes written.
+    /// Encode raw bytes to Base64 ASCII, returning the number of bytes written.
     ///
-    /// This is a static (associated) function — it does not depend on decoder
-    /// options. Uses SSSE3 vectorised encoding when available, falling back to
-    /// scalar for the tail.
+    /// Uses SSSE3 vectorised encoding when available, falling back to scalar
+    /// for the tail. The encoder is independent of [`DecodeOpts`].
     #[inline]
-    pub fn encode_to_slice(input: &[u8], out: &mut [u8]) -> usize {
+    pub fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
         let mut consumed = 0usize;
         let mut written = 0usize;
 
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        {
-            if std::is_x86_feature_detected!("ssse3") {
-                let (c, w) = unsafe { encode_engine::encode_base64_ssse3(input, out) };
-                consumed = c;
-                written = w;
-            }
+        if std::is_x86_feature_detected!("ssse3") {
+            // SAFETY: feature gate checked above.
+            let (c, w) = unsafe { encode_engine::encode_base64_ssse3(input, out) };
+            consumed = c;
+            written = w;
         }
 
         if consumed < input.len() {
@@ -160,24 +157,14 @@ impl Default for Ssse3Decoder {
 }
 
 impl Base64Decoder for Ssse3Decoder {
-    fn decode(&self, input: &[u8]) -> Option<Vec<u8>> {
-        let out_len = decoded_len_strict(input)?;
-        let mut out = vec![0u8; out_len];
-        let written = self.decode_to_slice(input, &mut out)?;
-        debug_assert_eq!(written, out_len);
-        Some(out)
+    #[inline]
+    fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
+        Ssse3Decoder::decode_to_slice(self, input, out)
     }
 
-    fn encode(&self, input: &[u8]) -> Vec<u8> {
-        let out_len = ((input.len() + 2) / 3) * 4;
-        let mut out = Vec::<u8>::with_capacity(out_len);
-        unsafe {
-            out.set_len(out_len);
-        }
-        let written = Self::encode_to_slice(input, &mut out);
-        out.truncate(written);
-        debug_assert_eq!(written, out_len);
-        out
+    #[inline]
+    fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
+        Ssse3Decoder::encode_to_slice(self, input, out)
     }
 }
 
@@ -190,7 +177,6 @@ impl Base64Decoder for Ssse3Decoder {
 /// The SIMD engine processes as many full 16-byte (or DS64) blocks as possible,
 /// returning `(consumed, written)`. This helper calls the scalar fallback for
 /// any remaining bytes.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[inline]
 fn dispatch_decode(
     input: &[u8],
@@ -213,13 +199,9 @@ fn dispatch_decode(
 // ---------------------------------------------------------------------------
 // Decode engine — all functions require `target_feature(enable = "ssse3")`
 // ---------------------------------------------------------------------------
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[allow(unsafe_op_in_unsafe_fn)]
 mod decode_engine {
-    #[cfg(target_arch = "x86")]
-    use core::arch::x86::*;
-    #[cfg(target_arch = "x86_64")]
-    use core::arch::x86_64::*;
+    use super::*;
 
     /// SIMD lookup tables used by the Turbo-Base64 mapping and validation
     /// pipeline. All seven vectors are held in XMM registers for the duration
@@ -513,7 +495,7 @@ mod decode_engine {
                 return Some((in_ptr, out_ptr));
             }
             // SAFETY: in_ptr points to at least 4 valid bytes, out_ptr to at least 3.
-            let u = crate::simd::scalar::decode_tail_3(
+            let u = crate::engine::scalar::decode_tail_3(
                 &*(in_ptr as *const [u8; 4]),
                 &mut *(out_ptr as *mut [u8; 3]),
             );
@@ -731,13 +713,9 @@ mod decode_engine {
 // ---------------------------------------------------------------------------
 // Encode engine — all functions require `target_feature(enable = "ssse3")`
 // ---------------------------------------------------------------------------
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[allow(unsafe_op_in_unsafe_fn)]
 mod encode_engine {
-    #[cfg(target_arch = "x86")]
-    use core::arch::x86::*;
-    #[cfg(target_arch = "x86_64")]
-    use core::arch::x86_64::*;
+    use super::*;
 
     /// Vectorised unsigned 16-bit multiply for two register pairs.
     ///
@@ -831,7 +809,7 @@ mod encode_engine {
             let a = *in_ptr;
             let b = *in_ptr.add(1);
             let c = *in_ptr.add(2);
-            crate::simd::scalar::encode_block_3_to_4_ptr(a, b, c, out_ptr);
+            crate::engine::scalar::encode_block_3_to_4_ptr(a, b, c, out_ptr);
             in_ptr = in_ptr.add(3);
             out_ptr = out_ptr.add(4);
         }

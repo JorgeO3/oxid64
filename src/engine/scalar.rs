@@ -338,7 +338,7 @@ const fn encode_tail_rem2(rem0: u8, rem1: u8, out4: &mut [u8; 4]) {
 ///
 /// `out` must point to at least 4 writable bytes. The write is unaligned.
 #[inline(always)]
-pub unsafe fn encode_block_3_to_4_ptr(a: u8, b: u8, c: u8, out: *mut u8) {
+pub(crate) unsafe fn encode_block_3_to_4_ptr(a: u8, b: u8, c: u8, out: *mut u8) {
     let x = enc3_lut(a, b, c);
     // SAFETY: caller guarantees `out` points to >= 4 writable bytes.
     unsafe { core::ptr::write_unaligned(out as *mut u32, x.to_le()) };
@@ -617,7 +617,7 @@ fn decode_body_blocks_64_to_48(chunks64: &[[u8; 64]], out48: &mut [[u8; 48]], cu
 /// any non-padding character is invalid. The `decoded_word` is included so
 /// callers can OR it into the error-detection accumulator `cu`.
 #[inline(always)]
-pub const fn decode_tail_3(last4: &[u8; 4], out3: &mut [u8; 3]) -> Option<(usize, u32)> {
+pub(crate) const fn decode_tail_3(last4: &[u8; 4], out3: &mut [u8; 3]) -> Option<(usize, u32)> {
     let a = last4[0];
     let b = last4[1];
     let c = last4[2];
@@ -670,7 +670,7 @@ pub const fn decode_tail_3(last4: &[u8; 4], out3: &mut [u8; 3]) -> Option<(usize
 /// into `out[out_off..]`. The intermediate 3-byte buffer avoids bounds-check
 /// noise in the hot caller.
 #[inline(always)]
-pub fn decode_tail(last4: &[u8; 4], out: &mut [u8], out_off: usize) -> Option<(usize, u32)> {
+pub(crate) fn decode_tail(last4: &[u8; 4], out: &mut [u8], out_off: usize) -> Option<(usize, u32)> {
     let mut tmp = [0u8; 3];
     let (written, cu) = decode_tail_3(last4, &mut tmp)?;
 
@@ -776,20 +776,14 @@ pub fn decode_base64_fast(in_data: &[u8], out_data: &mut [u8]) -> Option<usize> 
 pub struct ScalarDecoder;
 
 impl Base64Decoder for ScalarDecoder {
-    fn decode(&self, input: &[u8]) -> Option<Vec<u8>> {
-        let out_len = decoded_len_strict(input)?;
-        let mut out = vec![0u8; out_len];
-        let written = decode_base64_fast(input, &mut out)?;
-        debug_assert_eq!(written, out_len);
-        Some(out)
+    #[inline]
+    fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
+        decode_base64_fast(input, out)
     }
 
-    fn encode(&self, input: &[u8]) -> Vec<u8> {
-        let out_len = encoded_len(input.len());
-        let mut out = vec![0u8; out_len];
-        let written = encode_base64_fast(input, &mut out);
-        debug_assert_eq!(written, out_len);
-        out
+    #[inline]
+    fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
+        encode_base64_fast(input, out)
     }
 }
 

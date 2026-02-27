@@ -1,5 +1,5 @@
-use oxid64::simd::scalar::{decode_base64_fast, encode_base64_fast};
-use oxid64::simd::ssse3::{DecodeOpts, Ssse3Decoder};
+use oxid64::engine::scalar::{decode_base64_fast, encode_base64_fast};
+use oxid64::engine::ssse3::{DecodeOpts, Ssse3Decoder};
 use proptest::prelude::*;
 
 fn decode_scalar_reference(input: &[u8]) -> Option<Vec<u8>> {

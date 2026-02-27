@@ -1,23 +1,35 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
+use super::scalar::{decode_base64_fast, encode_base64_fast};
 use super::Base64Decoder;
-use super::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
 
+#[cfg(target_arch = "x86")]
+use core::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::*;
+
+/// AVX2 Base64 encoder.
+///
+/// Currently provides a vectorised encoder; decoding delegates to the scalar
+/// engine. When an AVX2 decoder is implemented, this struct will gain full
+/// decode support.
 pub struct Avx2Decoder;
 
 impl Avx2Decoder {
+    /// Encode raw bytes to Base64 ASCII, returning the number of bytes written.
+    ///
+    /// Uses AVX2 vectorised encoding when available, falling back to scalar
+    /// for the tail.
     #[inline]
-    pub fn encode_to_slice(input: &[u8], mut out: &mut [u8]) -> usize {
+    pub fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
         let mut consumed = 0usize;
         let mut written = 0usize;
 
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        {
-            if std::is_x86_feature_detected!("avx2") {
-                let (c, w) = unsafe { avx2_engine::encode_base64_avx2(input, &mut out) };
-                consumed = c;
-                written = w;
-            }
+        if std::is_x86_feature_detected!("avx2") {
+            // SAFETY: feature gate checked above.
+            let (c, w) = unsafe { avx2_engine::encode_base64_avx2(input, out) };
+            consumed = c;
+            written = w;
         }
 
         if consumed < input.len() {
@@ -29,29 +41,20 @@ impl Avx2Decoder {
 }
 
 impl Base64Decoder for Avx2Decoder {
-    fn decode(&self, input: &[u8]) -> Option<Vec<u8>> {
-        let out_len = decoded_len_strict(input)?;
-        let mut out = vec![0u8; out_len];
-        let written = decode_base64_fast(input, &mut out)?;
-        debug_assert_eq!(written, out_len);
-        Some(out)
+    #[inline]
+    fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
+        // TODO: implement AVX2 decode engine
+        decode_base64_fast(input, out)
     }
 
-    fn encode(&self, input: &[u8]) -> Vec<u8> {
-        let out_len = ((input.len() + 2) / 3) * 4;
-        let mut out = vec![0u8; out_len];
-        let written = Self::encode_to_slice(input, &mut out);
-        out.truncate(written);
-        out
+    #[inline]
+    fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
+        Avx2Decoder::encode_to_slice(self, input, out)
     }
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod avx2_engine {
-    #[cfg(target_arch = "x86")]
-    use core::arch::x86::*;
-    #[cfg(target_arch = "x86_64")]
-    use core::arch::x86_64::*;
+    use super::*;
 
     #[inline]
     #[target_feature(enable = "avx2")]

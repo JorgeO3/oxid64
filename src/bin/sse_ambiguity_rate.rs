@@ -1,12 +1,11 @@
 #![allow(clippy::cast_possible_truncation)]
 
-use oxid64::simd::scalar::encode_base64_fast;
+use oxid64::engine::scalar::encode_base64_fast;
 use std::fs;
 use std::path::PathBuf;
 
 const DELTA_ASSO: [u8; 16] = [
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00,
-    0x0f,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x0f,
 ];
 
 // Same table used by the hybrid experiment kernel.
@@ -169,7 +168,10 @@ fn print_stats(name: &str, st: Stats) {
     println!("  safe_len             : {}", st.safe_len);
     println!("  vectorized_len       : {}", st.vec_len);
     println!("  ambiguous_bytes      : {}", st.amb_bytes);
-    println!("  ambiguous_byte_rate  : {:.4}%", st.amb_byte_rate() * 100.0);
+    println!(
+        "  ambiguous_byte_rate  : {:.4}%",
+        st.amb_byte_rate() * 100.0
+    );
     println!(
         "  16B ambiguous blocks : {}/{} ({:.4}%)",
         st.blocks16_amb,
@@ -235,7 +237,8 @@ fn main() -> Result<(), String> {
     }
 
     if let Some(path) = file {
-        let data = fs::read(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+        let data =
+            fs::read(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
         datasets.push(Dataset {
             name: format!("file({})", path.display()),
             encoded: data,

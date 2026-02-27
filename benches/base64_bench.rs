@@ -1,9 +1,9 @@
 #![allow(warnings)]
 use base64_turbo::STANDARD as BASE64_TURBO_STANDARD;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use oxid64::simd::avx2::Avx2Decoder;
-use oxid64::simd::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
-use oxid64::simd::ssse3::{DecodeOpts, Ssse3Decoder};
+use oxid64::engine::avx2::Avx2Decoder;
+use oxid64::engine::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
+use oxid64::engine::ssse3::{DecodeOpts, Ssse3Decoder};
 
 unsafe extern "C" {
     fn tb64sdec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
@@ -227,10 +227,8 @@ pub fn bench_base64_encode(c: &mut Criterion) {
             &input,
             |b, i| {
                 b.iter(|| {
-                    let _ = Ssse3Decoder::encode_to_slice(
-                        black_box(i.as_slice()),
-                        black_box(output.as_mut_slice()),
-                    );
+                    let _ = Ssse3Decoder::new()
+                        .encode_to_slice(black_box(i.as_slice()), black_box(output.as_mut_slice()));
                 });
             },
         );
@@ -282,10 +280,8 @@ pub fn bench_base64_encode(c: &mut Criterion) {
             &input,
             |b, i| {
                 b.iter(|| {
-                    let _ = Avx2Decoder::encode_to_slice(
-                        black_box(i.as_slice()),
-                        black_box(output.as_mut_slice()),
-                    );
+                    let _ = Avx2Decoder
+                        .encode_to_slice(black_box(i.as_slice()), black_box(output.as_mut_slice()));
                 });
             },
         );

@@ -1,6 +1,6 @@
-use oxid64::simd::avx2::Avx2Decoder;
-use oxid64::simd::scalar::encode_base64_fast;
-use oxid64::simd::ssse3::Ssse3Decoder;
+use oxid64::engine::avx2::Avx2Decoder;
+use oxid64::engine::scalar::encode_base64_fast;
+use oxid64::engine::ssse3::Ssse3Decoder;
 use proptest::prelude::*;
 
 fn encode_scalar_reference(input: &[u8]) -> Vec<u8> {
@@ -14,7 +14,7 @@ fn encode_scalar_reference(input: &[u8]) -> Vec<u8> {
 fn encode_sse_reference(input: &[u8]) -> Vec<u8> {
     let out_len = ((input.len() + 2) / 3) * 4;
     let mut out = vec![0u8; out_len + 64];
-    let n = Ssse3Decoder::encode_to_slice(input, &mut out);
+    let n = Ssse3Decoder::new().encode_to_slice(input, &mut out);
     out.truncate(n);
     out
 }
@@ -22,7 +22,7 @@ fn encode_sse_reference(input: &[u8]) -> Vec<u8> {
 fn encode_avx2_reference(input: &[u8]) -> Vec<u8> {
     let out_len = ((input.len() + 2) / 3) * 4;
     let mut out = vec![0u8; out_len + 64];
-    let n = Avx2Decoder::encode_to_slice(input, &mut out);
+    let n = Avx2Decoder.encode_to_slice(input, &mut out);
     out.truncate(n);
     out
 }
