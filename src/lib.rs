@@ -1,4 +1,3 @@
-pub mod cpu;
 pub mod engine;
 
 // Re-export the primary public API at the crate root.
