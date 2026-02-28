@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-base64-turbo = { version = "0.1.6", features = ["unstable"] }
 
 [dev-dependencies]
 proptest = "1.4"
@@ -16,8 +15,4 @@ harness = false
 
 [profile.release]
 opt-level = 3
-lto = "fat"
-codegen-units = 1
 debug = "full"
-panic = "abort"
-incremental = false

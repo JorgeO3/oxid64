@@ -8,11 +8,7 @@ fn decode_scalar_reference(input: &[u8]) -> Option<Vec<u8>> {
         return Some(vec![]);
     }
     let pad = if input[n - 1] == b'=' {
-        if input[n - 2] == b'=' {
-            2
-        } else {
-            1
-        }
+        if input[n - 2] == b'=' { 2 } else { 1 }
     } else {
         0
     };
@@ -31,11 +27,7 @@ fn decode_ssse3_strict(input: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let pad = if input[n - 1] == b'=' {
-        if input[n - 2] == b'=' {
-            2
-        } else {
-            1
-        }
+        if input[n - 2] == b'=' { 2 } else { 1 }
     } else {
         0
     };
@@ -56,11 +48,7 @@ fn decode_ssse3_non_strict(input: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let pad = if input[n - 1] == b'=' {
-        if input[n - 2] == b'=' {
-            2
-        } else {
-            1
-        }
+        if input[n - 2] == b'=' { 2 } else { 1 }
     } else {
         0
     };
@@ -75,7 +63,7 @@ fn decode_ssse3_non_strict(input: &[u8]) -> Option<Vec<u8>> {
 proptest! {
     #[test]
     fn test_sse_decode_matches_scalar(ref input in any::<Vec<u8>>()) {
-        let mut encoded = vec![0u8; ((input.len() + 2) / 3) * 4];
+        let mut encoded = vec![0u8; input.len().div_ceil(3) * 4];
         let _enc_len = encode_base64_fast(input, &mut encoded);
 
         if is_x86_feature_detected!("ssse3") {
@@ -93,9 +81,9 @@ fn test_sse_decode_specific_lengths() {
     if !is_x86_feature_detected!("ssse3") {
         return;
     }
-    for len in 0..1024 {
+    for len in 0usize..1024 {
         let input: Vec<u8> = (0..len).map(|i| (i % 256) as u8).collect();
-        let mut encoded = vec![0u8; ((len + 2) / 3) * 4];
+        let mut encoded = vec![0u8; len.div_ceil(3) * 4];
         let _enc_len = encode_base64_fast(&input, &mut encoded);
 
         let expected = decode_scalar_reference(&encoded);

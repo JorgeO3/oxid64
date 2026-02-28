@@ -3,7 +3,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 fn encoded_len(source_len: usize) -> usize {
-    ((source_len + 2) / 3) * 4
+    source_len.div_ceil(3) * 4
 }
 
 fn xorshift_fill(buf: &mut [u8]) {

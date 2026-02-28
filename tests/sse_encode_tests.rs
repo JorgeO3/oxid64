@@ -4,7 +4,7 @@ use oxid64::engine::ssse3::Ssse3Decoder;
 use proptest::prelude::*;
 
 fn encode_scalar_reference(input: &[u8]) -> Vec<u8> {
-    let out_len = ((input.len() + 2) / 3) * 4;
+    let out_len = input.len().div_ceil(3) * 4;
     let mut out = vec![0u8; out_len + 64];
     let n = encode_base64_fast(input, &mut out);
     out.truncate(n);
@@ -12,7 +12,7 @@ fn encode_scalar_reference(input: &[u8]) -> Vec<u8> {
 }
 
 fn encode_sse_reference(input: &[u8]) -> Vec<u8> {
-    let out_len = ((input.len() + 2) / 3) * 4;
+    let out_len = input.len().div_ceil(3) * 4;
     let mut out = vec![0u8; out_len + 64];
     let n = Ssse3Decoder::new().encode_to_slice(input, &mut out);
     out.truncate(n);
@@ -20,9 +20,9 @@ fn encode_sse_reference(input: &[u8]) -> Vec<u8> {
 }
 
 fn encode_avx2_reference(input: &[u8]) -> Vec<u8> {
-    let out_len = ((input.len() + 2) / 3) * 4;
+    let out_len = input.len().div_ceil(3) * 4;
     let mut out = vec![0u8; out_len + 64];
-    let n = Avx2Decoder.encode_to_slice(input, &mut out);
+    let n = Avx2Decoder::new().encode_to_slice(input, &mut out);
     out.truncate(n);
     out
 }

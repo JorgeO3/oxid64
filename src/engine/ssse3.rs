@@ -40,8 +40,8 @@
 //! SSSE3 vectorised bit-manipulation, falling back to scalar for the tail.
 //! The encoder is independent of [`DecodeOpts`].
 
-use super::scalar::{decode_base64_fast, encode_base64_fast};
 use super::Base64Decoder;
+use super::scalar::{decode_base64_fast, encode_base64_fast};
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
@@ -178,6 +178,7 @@ impl Base64Decoder for Ssse3Decoder {
 /// returning `(consumed, written)`. This helper calls the scalar fallback for
 /// any remaining bytes.
 #[inline]
+#[allow(clippy::type_complexity)]
 fn dispatch_decode(
     input: &[u8],
     out: &mut [u8],
@@ -750,6 +751,7 @@ mod encode_engine {
     /// Each block is shuffled to spread 3 input bytes across 4 output lanes,
     /// then the 6-bit fields are extracted via [`fast_pmul_x2`] and mapped to
     /// ASCII via a pshufb offset table.
+    #[allow(clippy::too_many_arguments)]
     #[inline]
     #[target_feature(enable = "ssse3")]
     unsafe fn process_block_x2(

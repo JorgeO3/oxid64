@@ -6,7 +6,7 @@ pub use engine::{Base64Decoder, Decoder};
 /// Compute the Base64-encoded length for `n` raw input bytes (with padding).
 #[inline]
 pub const fn encoded_len(n: usize) -> usize {
-    ((n + 2) / 3) * 4
+    engine::scalar::encoded_len(n)
 }
 
 /// Compute the decoded byte length for a Base64 input slice (strict, with

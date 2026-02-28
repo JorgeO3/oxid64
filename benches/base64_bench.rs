@@ -1,6 +1,5 @@
 #![allow(warnings)]
-use base64_turbo::STANDARD as BASE64_TURBO_STANDARD;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use oxid64::engine::avx2::Avx2Decoder;
 use oxid64::engine::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
 use oxid64::engine::ssse3::{DecodeOpts, Ssse3Decoder};
@@ -11,6 +10,9 @@ unsafe extern "C" {
     fn tb64v128dec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64v128dec_b64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64v128dec_nb64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+    fn tb64v256dec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+    fn tb64v256dec_b64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+    fn tb64v256dec_nb64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
 
     fn tb64senc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64xenc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
@@ -73,56 +75,6 @@ pub fn bench_base64_decode(c: &mut Criterion) {
         );
 
         group.bench_with_input(
-            BenchmarkId::new("base64-turbo (decode_into)", size),
-            &encoded,
-            |b, i| {
-                b.iter(|| {
-                    let _ = BASE64_TURBO_STANDARD
-                        .decode_into(black_box(i.as_slice()), black_box(output.as_mut_slice()));
-                });
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("base64-turbo (unsafe decode_scalar)", size),
-            &encoded,
-            |b, i| {
-                b.iter(|| unsafe {
-                    let _ = BASE64_TURBO_STANDARD
-                        .decode_scalar(black_box(i.as_slice()), black_box(output.as_mut_slice()));
-                });
-            },
-        );
-
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        if std::arch::is_x86_feature_detected!("sse4.1") {
-            group.bench_with_input(
-                BenchmarkId::new("base64-turbo (unsafe decode_sse4)", size),
-                &encoded,
-                |b, i| {
-                    b.iter(|| unsafe {
-                        let _ = BASE64_TURBO_STANDARD
-                            .decode_sse4(black_box(i.as_slice()), black_box(output.as_mut_slice()));
-                    });
-                },
-            );
-        }
-
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        if std::arch::is_x86_feature_detected!("avx2") {
-            group.bench_with_input(
-                BenchmarkId::new("base64-turbo (unsafe decode_avx2)", size),
-                &encoded,
-                |b, i| {
-                    b.iter(|| unsafe {
-                        let _ = BASE64_TURBO_STANDARD
-                            .decode_avx2(black_box(i.as_slice()), black_box(output.as_mut_slice()));
-                    });
-                },
-            );
-        }
-
-        group.bench_with_input(
             BenchmarkId::new("TurboBase64 C (Fast Scalar)", size),
             &encoded,
             |b, i| {
@@ -151,11 +103,11 @@ pub fn bench_base64_decode(c: &mut Criterion) {
         );
 
         group.bench_with_input(
-            BenchmarkId::new("TurboBase64 C (SSE)", size),
+            BenchmarkId::new("TurboBase64 C (auto, no check)", size),
             &encoded,
             |b, i| {
                 b.iter(|| unsafe {
-                    tb64v128dec(
+                    tb64v128dec_nb64check(
                         black_box(i.as_ptr()),
                         black_box(i.len()),
                         black_box(output.as_mut_ptr()),
@@ -165,7 +117,7 @@ pub fn bench_base64_decode(c: &mut Criterion) {
         );
 
         group.bench_with_input(
-            BenchmarkId::new("TurboBase64 C (SSE, B64CHECK)", size),
+            BenchmarkId::new("TurboBase64 C (auto, check)", size),
             &encoded,
             |b, i| {
                 b.iter(|| unsafe {
@@ -179,11 +131,79 @@ pub fn bench_base64_decode(c: &mut Criterion) {
         );
 
         group.bench_with_input(
-            BenchmarkId::new("TurboBase64 C (SSE, NB64CHECK)", size),
+            BenchmarkId::new("TurboBase64 C (auto best)", size),
             &encoded,
             |b, i| {
                 b.iter(|| unsafe {
-                    tb64v128dec_nb64check(
+                    tb64v128dec(
+                        black_box(i.as_ptr()),
+                        black_box(i.len()),
+                        black_box(output.as_mut_ptr()),
+                    );
+                });
+            },
+        );
+
+        // -- AVX2 decode benchmarks --
+
+        group.bench_with_input(
+            BenchmarkId::new("Rust Port (AVX2)", size),
+            &encoded,
+            |b, i| {
+                let decoder = Avx2Decoder::with_opts(DecodeOpts { strict: false });
+                b.iter(|| {
+                    let _ = decoder
+                        .decode_to_slice(black_box(i.as_slice()), black_box(output.as_mut_slice()));
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("Rust Port (AVX2 Strict)", size),
+            &encoded,
+            |b, i| {
+                let decoder = Avx2Decoder::new();
+                b.iter(|| {
+                    let _ = decoder
+                        .decode_to_slice(black_box(i.as_slice()), black_box(output.as_mut_slice()));
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("TurboBase64 C (AVX2, no check)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| unsafe {
+                    tb64v256dec_nb64check(
+                        black_box(i.as_ptr()),
+                        black_box(i.len()),
+                        black_box(output.as_mut_ptr()),
+                    );
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("TurboBase64 C (AVX2, check)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| unsafe {
+                    tb64v256dec_b64check(
+                        black_box(i.as_ptr()),
+                        black_box(i.len()),
+                        black_box(output.as_mut_ptr()),
+                    );
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("TurboBase64 C (AVX2, default)", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| unsafe {
+                    tb64v256dec(
                         black_box(i.as_ptr()),
                         black_box(i.len()),
                         black_box(output.as_mut_ptr()),
@@ -276,11 +296,39 @@ pub fn bench_base64_encode(c: &mut Criterion) {
         );
 
         group.bench_with_input(
+            BenchmarkId::new("TurboBase64 C (auto encode, no check)", size),
+            &input,
+            |b, i| {
+                b.iter(|| unsafe {
+                    tb64xenc(
+                        black_box(i.as_ptr()),
+                        black_box(i.len()),
+                        black_box(output.as_mut_ptr()),
+                    );
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("TurboBase64 C (auto encode, best)", size),
+            &input,
+            |b, i| {
+                b.iter(|| unsafe {
+                    tb64v256enc(
+                        black_box(i.as_ptr()),
+                        black_box(i.len()),
+                        black_box(output.as_mut_ptr()),
+                    );
+                });
+            },
+        );
+
+        group.bench_with_input(
             BenchmarkId::new("Rust Port (AVX2)", size),
             &input,
             |b, i| {
                 b.iter(|| {
-                    let _ = Avx2Decoder
+                    let _ = Avx2Decoder::new()
                         .encode_to_slice(black_box(i.as_slice()), black_box(output.as_mut_slice()));
                 });
             },

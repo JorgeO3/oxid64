@@ -103,7 +103,7 @@ impl Decoder {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
             if std::arch::is_x86_feature_detected!("avx2") {
-                return Self::Avx2(avx2::Avx2Decoder);
+                return Self::Avx2(avx2::Avx2Decoder::new());
             }
             if std::arch::is_x86_feature_detected!("ssse3") {
                 return Self::Ssse3(ssse3::Ssse3Decoder::new());

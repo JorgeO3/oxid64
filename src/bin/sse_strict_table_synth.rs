@@ -4,8 +4,7 @@
 use std::collections::BTreeSet;
 
 const DELTA_ASSO: [u8; 16] = [
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00,
-    0x0f,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x0f,
 ];
 
 fn is_base64_valid_strict_simd(byte: u8) -> bool {
@@ -91,9 +90,7 @@ fn main() {
     println!(
         "Shared-hash strict feasibility for check_values2[16] using current delta_hash nibble"
     );
-    println!(
-        "Condition checked: sign(sat_add_i8(check_values2[h], input_byte)) == invalid_byte"
-    );
+    println!("Condition checked: sign(sat_add_i8(check_values2[h], input_byte)) == invalid_byte");
     println!("Strict-valid set: [A-Za-z0-9+/], '=' treated invalid in SIMD region");
     println!();
 
@@ -142,4 +139,3 @@ fn main() {
         );
     }
 }
-

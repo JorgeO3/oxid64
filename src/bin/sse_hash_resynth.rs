@@ -6,8 +6,7 @@ use std::env;
 use std::thread;
 
 const BASE_DELTA_ASSO: [u8; 16] = [
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00,
-    0x0f,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x0f,
 ];
 const BASE_DELTA_PERTURB: [u8; 16] = [0u8; 16];
 const BASE_DELTA_HI: [u8; 16] = [0u8; 16];
@@ -335,7 +334,7 @@ fn hash_mixed_raw(
 ) -> u8 {
     debug_assert!(pos_in_dword < 4);
     let k = spec.shift;
-    debug_assert!(k >= 1 && k <= 7);
+    debug_assert!((1..=7).contains(&k));
 
     let lo = (byte & 0x0f) as usize;
     let hi = (byte >> 4) as usize;
@@ -826,7 +825,11 @@ fn derive_delta_values(
     Some(out)
 }
 
-fn derive_check_values(tables: &HashTables, spec: HashSpec, valid_lut: &[bool; 256]) -> Option<[i8; 16]> {
+fn derive_check_values(
+    tables: &HashTables,
+    spec: HashSpec,
+    valid_lut: &[bool; 256],
+) -> Option<[i8; 16]> {
     let (_, buckets, _, _) = build_buckets_and_msb_violations(tables, spec, valid_lut);
     let mut out = [0i8; 16];
 
@@ -970,12 +973,20 @@ fn main() {
     }
 
     println!("Hash re-synthesis (same SIMD budget family)");
-    println!("Model: raw = mix(lut0[low_nibble], shifted(byte,k)); optional perturb LUT1; idx tier = maskless|masked_0f");
-    println!("mix in {{avg_epu8, add_epi8, xor_si128, min_epu8, max_epu8, sub_epi8}}, families expanded (one/two-lut, predicate-select, pos-aware, lo+hi, dual-index), k in {{1,2,3,4}}");
+    println!(
+        "Model: raw = mix(lut0[low_nibble], shifted(byte,k)); optional perturb LUT1; idx tier = maskless|masked_0f"
+    );
+    println!(
+        "mix in {{avg_epu8, add_epi8, xor_si128, min_epu8, max_epu8, sub_epi8}}, families expanded (one/two-lut, predicate-select, pos-aware, lo+hi, dual-index), k in {{1,2,3,4}}"
+    );
     println!("Objective: shared-hash strict candidate that is implementable in hot loop");
-    println!("PASS_MASKLESS: map_conflict=0, valid_msb_vio=0, ascii_msb_vio=0, impossible=0, extra_ops<=1, const_live_delta<=0");
+    println!(
+        "PASS_MASKLESS: map_conflict=0, valid_msb_vio=0, ascii_msb_vio=0, impossible=0, extra_ops<=1, const_live_delta<=0"
+    );
     println!("PASS_MASKED: map_conflict=0, impossible=0, extra_ops<=1, const_live_delta<=0");
-    println!("PASS_EXTENDED: map_conflict=0, impossible/poison_impossible=0, valid_msb_vio=0, ascii_msb_vio=0, extra_ops<=2, const_live_delta<=1");
+    println!(
+        "PASS_EXTENDED: map_conflict=0, impossible/poison_impossible=0, valid_msb_vio=0, ascii_msb_vio=0, extra_ops<=2, const_live_delta<=1"
+    );
 
     let threads = args
         .get(3)
@@ -1059,7 +1070,10 @@ fn main() {
             best.score.mixed_buckets,
             best.score.feasible_width_sum
         );
-        println!("  best tables: {}", format_tables_hex(best.spec, &best.tables));
+        println!(
+            "  best tables: {}",
+            format_tables_hex(best.spec, &best.tables)
+        );
     }
 
     best_all.sort_by(|a, b| a.score.cmp_key().cmp(&b.score.cmp_key()));
@@ -1086,19 +1100,11 @@ fn main() {
         );
     }
 
-    let passing_maskless: Vec<&Candidate> = best_all
-        .iter()
-        .filter(|c| c.pass_maskless())
-        .collect();
-    let passing_masked: Vec<&Candidate> = best_all
-        .iter()
-        .filter(|c| c.pass_masked())
-        .collect();
+    let passing_maskless: Vec<&Candidate> = best_all.iter().filter(|c| c.pass_maskless()).collect();
+    let passing_masked: Vec<&Candidate> = best_all.iter().filter(|c| c.pass_masked()).collect();
     println!();
     if passing_maskless.is_empty() {
-        println!(
-            "RESULT: no PASSING MASKLESS shared-hash candidate found."
-        );
+        println!("RESULT: no PASSING MASKLESS shared-hash candidate found.");
     } else {
         println!(
             "RESULT: found {} PASSING MASKLESS shared-hash candidate(s).",
@@ -1108,7 +1114,7 @@ fn main() {
         for (i, c) in passing_maskless.iter().enumerate() {
             let delta_values =
                 derive_delta_values(&c.tables, c.spec, &valid_lut, &required_delta_lut)
-                .expect("passing candidate must derive delta_values");
+                    .expect("passing candidate must derive delta_values");
             let check_values = derive_check_values(&c.tables, c.spec, &valid_lut)
                 .expect("passing candidate must derive check_values");
             println!(
@@ -1120,8 +1126,14 @@ fn main() {
                 c.spec.shift,
                 format_tables_hex(c.spec, &c.tables)
             );
-            println!("     DELTA_VALUES(i8): [{}]", format_table_i8_dec(&delta_values));
-            println!("     CHECK_VALUES(i8): [{}]", format_table_i8_dec(&check_values));
+            println!(
+                "     DELTA_VALUES(i8): [{}]",
+                format_table_i8_dec(&delta_values)
+            );
+            println!(
+                "     CHECK_VALUES(i8): [{}]",
+                format_table_i8_dec(&check_values)
+            );
         }
     }
 
@@ -1153,8 +1165,10 @@ fn main() {
         }
     }
 
-    let passing_shared_extended: Vec<&Candidate> =
-        best_all.iter().filter(|c| c.pass_shared_extended()).collect();
+    let passing_shared_extended: Vec<&Candidate> = best_all
+        .iter()
+        .filter(|c| c.pass_shared_extended())
+        .collect();
     if passing_shared_extended.is_empty() {
         println!("RESULT: no PASSING EXTENDED shared-hash candidate found.");
     } else {
@@ -1222,13 +1236,9 @@ fn main() {
             passing_poison_maskless.len()
         );
         for (i, c) in passing_poison_maskless.iter().enumerate() {
-            let delta_values = derive_poison_delta_values_80(
-                &c.tables,
-                c.spec,
-                &valid_lut,
-                &required_delta_lut,
-            )
-                .expect("poison passing candidate must derive delta table");
+            let delta_values =
+                derive_poison_delta_values_80(&c.tables, c.spec, &valid_lut, &required_delta_lut)
+                    .expect("poison passing candidate must derive delta table");
             println!(
                 "  {}. family={} mode={} mix={} shift={} tables={}",
                 i + 1,
@@ -1238,7 +1248,10 @@ fn main() {
                 c.spec.shift,
                 format_tables_hex(c.spec, &c.tables)
             );
-            println!("     DELTA_VALUES_POISON(u8): [{}]", format_table_u8_hex(&delta_values));
+            println!(
+                "     DELTA_VALUES_POISON(u8): [{}]",
+                format_table_u8_hex(&delta_values)
+            );
         }
     }
 
@@ -1250,13 +1263,9 @@ fn main() {
             passing_poison_masked.len()
         );
         for (i, c) in passing_poison_masked.iter().take(5).enumerate() {
-            let delta_values = derive_poison_delta_values_80(
-                &c.tables,
-                c.spec,
-                &valid_lut,
-                &required_delta_lut,
-            )
-                .expect("poison passing candidate must derive delta table");
+            let delta_values =
+                derive_poison_delta_values_80(&c.tables, c.spec, &valid_lut, &required_delta_lut)
+                    .expect("poison passing candidate must derive delta table");
             println!(
                 "  {}. family={} mode={} mix={} shift={} tables={}",
                 i + 1,
@@ -1266,12 +1275,17 @@ fn main() {
                 c.spec.shift,
                 format_tables_hex(c.spec, &c.tables)
             );
-            println!("     DELTA_VALUES_POISON(u8): [{}]", format_table_u8_hex(&delta_values));
+            println!(
+                "     DELTA_VALUES_POISON(u8): [{}]",
+                format_table_u8_hex(&delta_values)
+            );
         }
     }
 
-    let passing_poison_extended: Vec<&Candidate> =
-        by_poison.iter().filter(|c| c.pass_poison_extended()).collect();
+    let passing_poison_extended: Vec<&Candidate> = by_poison
+        .iter()
+        .filter(|c| c.pass_poison_extended())
+        .collect();
     if passing_poison_extended.is_empty() {
         println!("RESULT: no PASSING EXTENDED poisoned-mapping candidate found.");
     } else {
@@ -1280,13 +1294,9 @@ fn main() {
             passing_poison_extended.len()
         );
         for (i, c) in passing_poison_extended.iter().take(5).enumerate() {
-            let delta_values = derive_poison_delta_values_80(
-                &c.tables,
-                c.spec,
-                &valid_lut,
-                &required_delta_lut,
-            )
-                .expect("extended poison candidate must derive delta table");
+            let delta_values =
+                derive_poison_delta_values_80(&c.tables, c.spec, &valid_lut, &required_delta_lut)
+                    .expect("extended poison candidate must derive delta table");
             println!(
                 "  {}. family={} mode={} mix={} shift={} (extra_ops={}, const_live_delta={}) tables={}",
                 i + 1,
@@ -1298,7 +1308,10 @@ fn main() {
                 c.spec.const_live_delta(),
                 format_tables_hex(c.spec, &c.tables)
             );
-            println!("     DELTA_VALUES_POISON(u8): [{}]", format_table_u8_hex(&delta_values));
+            println!(
+                "     DELTA_VALUES_POISON(u8): [{}]",
+                format_table_u8_hex(&delta_values)
+            );
         }
     }
 }

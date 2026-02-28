@@ -3,8 +3,7 @@
 use std::collections::BTreeSet;
 
 const DELTA_ASSO: [u8; 16] = [
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00,
-    0x0f,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x0f,
 ];
 
 #[derive(Clone, Copy)]
@@ -293,7 +292,10 @@ fn main() {
         }
     }
 
-    println!("\nBest by Option1 mixed-bucket count: {} ({})", best_opt1.1, best_opt1.0);
+    println!(
+        "\nBest by Option1 mixed-bucket count: {} ({})",
+        best_opt1.1, best_opt1.0
+    );
     println!(
         "Best by Option2 impossible-bucket count: {} ({})",
         best_opt2.1, best_opt2.0
@@ -346,4 +348,3 @@ fn main() {
         print_bucket_detail(best, &buckets);
     }
 }
-

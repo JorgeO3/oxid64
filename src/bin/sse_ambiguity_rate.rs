@@ -138,7 +138,7 @@ fn bench_like_encoded(size: usize) -> Vec<u8> {
     for (i, b) in input.iter_mut().enumerate() {
         *b = (i % 256) as u8;
     }
-    let mut encoded = vec![0u8; ((size + 2) / 3) * 4 + 64];
+    let mut encoded = vec![0u8; size.div_ceil(3) * 4 + 64];
     let n = encode_base64_fast(&input, &mut encoded);
     encoded.truncate(n);
     encoded

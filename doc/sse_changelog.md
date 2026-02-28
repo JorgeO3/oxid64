@@ -854,3 +854,13 @@ Suggested entry ID format:
 - Decision:
   - do not pursue this kernel path further as-is (low ROI).
   - keep implementation as reference experiment; prefer reverting from benchmark rotation if we want cleaner default runs.
+
+### SSE-2026-02-27-026
+
+- Change: benchmarked TurboBase64's auto decode paths (with and without checks).
+- Scope:
+  - `benches/base64_bench.rs`
+- Additions:
+  - new labels `TurboBase64 C (auto, no check)`, `TurboBase64 C (auto, check)`, `TurboBase64 C (auto best)` calling `tb64v128dec_nb64check`, `tb64v128dec_b64check`, `tb64v128dec`.
+  - mirror these additions under encoding with `TurboBase64 C (auto encode, no check)` and `TurboBase64 C (auto encode, best)` targeting `tb64xenc` and `tb64v256enc`.
+- Outcome: adds clarity on TurboStack's max throughput both with validation and without (auto path selects fastest instruction set at runtime).

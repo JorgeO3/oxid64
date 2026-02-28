@@ -219,8 +219,8 @@ static DEC_LUTS: DecLuts = DecLuts {
 
 /// Compute the Base64-encoded length (with padding) for `n` raw bytes.
 #[inline(always)]
-const fn encoded_len(n: usize) -> usize {
-    ((n + 2) / 3) * 4
+pub const fn encoded_len(n: usize) -> usize {
+    n.div_ceil(3) * 4
 }
 
 /// Pack two LUT entries (chars 0–1 and chars 2–3) into a single `u32`.
@@ -448,11 +448,7 @@ pub const fn decoded_len_strict(b64: &[u8]) -> Option<usize> {
     }
 
     let pad = if b64[n - 1] == b'=' {
-        if b64[n - 2] == b'=' {
-            2
-        } else {
-            1
-        }
+        if b64[n - 2] == b'=' { 2 } else { 1 }
     } else {
         0
     };
@@ -819,7 +815,7 @@ mod tests {
         ];
 
         for (input, expected) in CASES {
-            let mut out = vec![0u8; ((input.len() + 2) / 3) * 4 + 8];
+            let mut out = vec![0u8; input.len().div_ceil(3) * 4 + 8];
             let written = encode_base64_fast(input, &mut out);
             assert_eq!(&out[..written], expected.as_bytes(), "encode mismatch");
 
@@ -837,7 +833,7 @@ mod tests {
             let mut input = vec![0u8; len];
             fill_xorshift(&mut input);
 
-            let mut encoded = vec![0u8; ((len + 2) / 3) * 4 + 8];
+            let mut encoded = vec![0u8; len.div_ceil(3) * 4 + 8];
             let enc_written = encode_base64_fast(&input, &mut encoded);
             let encoded = &encoded[..enc_written];
 

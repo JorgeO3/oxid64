@@ -1,6 +1,6 @@
+use oxid64::engine::Base64Decoder;
 use oxid64::engine::scalar::encode_base64_fast;
 use oxid64::engine::ssse3::Ssse3Decoder;
-use oxid64::engine::Base64Decoder;
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -9,7 +9,7 @@ unsafe extern "C" {
 }
 
 fn encoded_len(n: usize) -> usize {
-    ((n + 2) / 3) * 4
+    n.div_ceil(3) * 4
 }
 
 fn xorshift_fill(buf: &mut [u8]) {

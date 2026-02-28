@@ -10,7 +10,7 @@ unsafe extern "C" {
 }
 
 fn encoded_len(n: usize) -> usize {
-    ((n + 2) / 3) * 4
+    n.div_ceil(3) * 4
 }
 
 fn xorshift_fill(buf: &mut [u8]) {
