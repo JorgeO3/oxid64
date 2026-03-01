@@ -40,40 +40,13 @@
 //! SSSE3 vectorised bit-manipulation, falling back to scalar for the tail.
 //! The encoder is independent of [`DecodeOpts`].
 
-use super::Base64Decoder;
-use super::scalar::{decode_base64_fast, encode_base64_fast};
+use super::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
+use super::{Base64Decoder, DecodeOpts, b2i, w2i};
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
-
-/// Decoder configuration options.
-///
-/// Controls the strictness of input validation during SSSE3 Base64 decoding.
-///
-/// # Default
-///
-/// The default configuration enables strict mode (`strict: true`), which
-/// validates every input byte. This is the safe choice for untrusted input.
-///
-/// ```
-/// # use oxid64::engine::ssse3::DecodeOpts;
-/// let opts = DecodeOpts::default();
-/// assert!(opts.strict);
-/// ```
-pub struct DecodeOpts {
-    /// When `true`, every input vector is validated (CHECK1 mode).
-    /// When `false`, only 1 of every 4 vectors is validated (CHECK0 mode).
-    pub strict: bool,
-}
-
-impl Default for DecodeOpts {
-    #[inline]
-    fn default() -> Self {
-        Self { strict: true }
-    }
-}
 
 /// SSSE3 Base64 decoder and encoder.
 ///
@@ -111,6 +84,11 @@ impl Ssse3Decoder {
     /// Returns `None` if the input contains invalid Base64 characters.
     #[inline]
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
+        let out_len = decoded_len_strict(input)?;
+        if out.len() < out_len {
+            return None;
+        }
+
         if std::is_x86_feature_detected!("ssse3") {
             let engine_fn = if self.opts.strict {
                 decode_engine::decode_ssse3_strict
@@ -118,19 +96,26 @@ impl Ssse3Decoder {
             } else {
                 decode_engine::decode_ssse3 as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
             };
-            return dispatch_decode(input, out, engine_fn);
+            return super::dispatch_decode(input, out, engine_fn);
         }
 
         decode_base64_fast(input, out)
     }
 
     /// Encode raw bytes to Base64 ASCII, returning the number of bytes written.
-    /// Encode raw bytes to Base64 ASCII, returning the number of bytes written.
     ///
     /// Uses SSSE3 vectorised encoding when available, falling back to scalar
     /// for the tail. The encoder is independent of [`DecodeOpts`].
     #[inline]
     pub fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
+        let needed = input.len().div_ceil(3) * 4;
+        assert!(
+            out.len() >= needed,
+            "encode_to_slice output too small: need {}, have {}",
+            needed,
+            out.len()
+        );
+
         let mut consumed = 0usize;
         let mut written = 0usize;
 
@@ -177,26 +162,6 @@ impl Base64Decoder for Ssse3Decoder {
 /// The SIMD engine processes as many full 16-byte (or DS64) blocks as possible,
 /// returning `(consumed, written)`. This helper calls the scalar fallback for
 /// any remaining bytes.
-#[inline]
-#[allow(clippy::type_complexity)]
-fn dispatch_decode(
-    input: &[u8],
-    out: &mut [u8],
-    // SAFETY: caller guarantees SSSE3 is available before passing this function.
-    simd_fn: unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>,
-) -> Option<usize> {
-    let (consumed, mut written) = unsafe {
-        // SAFETY: caller checks is_x86_feature_detected!("ssse3") before calling.
-        simd_fn(input, out)?
-    };
-
-    if consumed < input.len() {
-        let tail_written = decode_base64_fast(&input[consumed..], &mut out[written..])?;
-        written += tail_written;
-    }
-    Some(written)
-}
-
 // ---------------------------------------------------------------------------
 // Decode engine — all functions require `target_feature(enable = "ssse3")`
 // ---------------------------------------------------------------------------
@@ -253,39 +218,39 @@ mod decode_engine {
                     0x00,
                     0x13,
                     0x04,
-                    0xbf_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xb9_u8 as i8,
-                    0xb9_u8 as i8,
+                    b2i(0xbf),
+                    b2i(0xbf),
+                    b2i(0xb9),
+                    b2i(0xb9),
                     0x00,
                     0x10,
-                    0xc3_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xb9_u8 as i8,
-                    0xb9_u8 as i8,
+                    b2i(0xc3),
+                    b2i(0xbf),
+                    b2i(0xbf),
+                    b2i(0xb9),
+                    b2i(0xb9),
                 ),
                 check_asso: _mm_setr_epi8(
                     0x0d, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x03, 0x07, 0x0b,
                     0x0b, 0x0b, 0x0f,
                 ),
                 check_values: _mm_setr_epi8(
-                    0x80_u8 as i8,
-                    0x80_u8 as i8,
-                    0x80_u8 as i8,
-                    0x80_u8 as i8,
-                    0xcf_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xd5_u8 as i8,
-                    0xa6_u8 as i8,
-                    0xb5_u8 as i8,
-                    0x86_u8 as i8,
-                    0xd1_u8 as i8,
-                    0x80_u8 as i8,
-                    0xb1_u8 as i8,
-                    0x80_u8 as i8,
-                    0x91_u8 as i8,
-                    0x80_u8 as i8,
+                    b2i(0x80),
+                    b2i(0x80),
+                    b2i(0x80),
+                    b2i(0x80),
+                    b2i(0xcf),
+                    b2i(0xbf),
+                    b2i(0xd5),
+                    b2i(0xa6),
+                    b2i(0xb5),
+                    b2i(0x86),
+                    b2i(0xd1),
+                    b2i(0x80),
+                    b2i(0xb1),
+                    b2i(0x80),
+                    b2i(0x91),
+                    b2i(0x80),
                 ),
                 cpv: _mm_set_epi8(-1, -1, -1, -1, 12, 13, 14, 8, 9, 10, 4, 5, 6, 0, 1, 2),
                 madd_mul_1: _mm_set1_epi32(0x01400140),
@@ -529,20 +494,6 @@ mod decode_engine {
         }
     }
 
-    /// Return `(consumed, written)` offsets from the base pointers.
-    #[inline]
-    fn offsets(
-        in_ptr: *const u8,
-        out_ptr: *const u8,
-        in_base: *const u8,
-        out_base: *const u8,
-    ) -> (usize, usize) {
-        (
-            in_ptr as usize - in_base as usize,
-            out_ptr as usize - out_base as usize,
-        )
-    }
-
     // -----------------------------------------------------------------------
     // Public entry points
     // -----------------------------------------------------------------------
@@ -568,7 +519,7 @@ mod decode_engine {
         if (safe_end as usize).saturating_sub(in_ptr as usize) < 32
             || (out_end as usize).saturating_sub(out_ptr as usize) < 16
         {
-            return Some(offsets(in_ptr, out_ptr, in_base, out_base));
+            return Some(crate::engine::offsets(in_ptr, out_ptr, in_base, out_base));
         }
 
         // SAFETY: DecodeTables::new() requires SSSE3, guaranteed by target_feature.
@@ -624,7 +575,7 @@ mod decode_engine {
             return None;
         }
 
-        Some(offsets(in_ptr, out_ptr, in_base, out_base))
+        Some(crate::engine::offsets(in_ptr, out_ptr, in_base, out_base))
     }
 
     /// Strict SSSE3 decode (CHECK1 mode — all vectors validated).
@@ -651,7 +602,7 @@ mod decode_engine {
         if (safe_end as usize).saturating_sub(in_ptr as usize) < 32
             || (out_end as usize).saturating_sub(out_ptr as usize) < 16
         {
-            return Some(offsets(in_ptr, out_ptr, in_base, out_base));
+            return Some(crate::engine::offsets(in_ptr, out_ptr, in_base, out_base));
         }
 
         // SAFETY: DecodeTables::new() requires SSSE3, guaranteed by target_feature.
@@ -707,7 +658,7 @@ mod decode_engine {
             return None;
         }
 
-        Some(offsets(in_ptr, out_ptr, in_base, out_base))
+        Some(crate::engine::offsets(in_ptr, out_ptr, in_base, out_base))
     }
 }
 
@@ -824,10 +775,10 @@ mod encode_engine {
         }
 
         let shuf = _mm_set_epi8(10, 11, 9, 10, 7, 8, 6, 7, 4, 5, 3, 4, 1, 2, 0, 1);
-        let mask1 = _mm_set1_epi32(0x0fc0fc00u32 as i32);
-        let mulhi = _mm_set1_epi32(0x04000040u32 as i32);
-        let mask2 = _mm_set1_epi32(0x003f03f0u32 as i32);
-        let mullo = _mm_set1_epi32(0x01000010u32 as i32);
+        let mask1 = _mm_set1_epi32(w2i(0x0fc0fc00));
+        let mulhi = _mm_set1_epi32(w2i(0x04000040));
+        let mask2 = _mm_set1_epi32(w2i(0x003f03f0));
+        let mullo = _mm_set1_epi32(w2i(0x01000010));
         let offsets = _mm_setr_epi8(
             65, 71, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -19, -16, 0, 0,
         );

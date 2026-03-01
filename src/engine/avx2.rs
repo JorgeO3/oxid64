@@ -1,8 +1,11 @@
-#![allow(unsafe_op_in_unsafe_fn)]
+//! AVX2 Base64 codec — Turbo-Base64 port.
+//!
+//! 256-bit vectorised Base64 encoder and decoder using the same delta-mapping
+//! / check / pack pipeline as the SSSE3 engine, widened to two 128-bit lanes
+//! processed in parallel per `__m256i` register.
 
-use super::Base64Decoder;
-use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::ssse3::DecodeOpts;
+use super::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
+use super::{Base64Decoder, DecodeOpts, b2i, w2i};
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
@@ -42,6 +45,11 @@ impl Avx2Decoder {
     /// Returns `None` if the input contains invalid Base64 characters.
     #[inline]
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
+        let out_len = decoded_len_strict(input)?;
+        if out.len() < out_len {
+            return None;
+        }
+
         if std::is_x86_feature_detected!("avx2") {
             let engine_fn = if self.opts.strict {
                 decode_engine::decode_avx2_strict
@@ -49,7 +57,7 @@ impl Avx2Decoder {
             } else {
                 decode_engine::decode_avx2 as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
             };
-            return dispatch_decode(input, out, engine_fn);
+            return super::dispatch_decode(input, out, engine_fn);
         }
 
         decode_base64_fast(input, out)
@@ -61,6 +69,14 @@ impl Avx2Decoder {
     /// for the tail.
     #[inline]
     pub fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
+        let needed = input.len().div_ceil(3) * 4;
+        assert!(
+            out.len() >= needed,
+            "encode_to_slice output too small: need {}, have {}",
+            needed,
+            out.len()
+        );
+
         let mut consumed = 0usize;
         let mut written = 0usize;
 
@@ -103,22 +119,6 @@ impl Base64Decoder for Avx2Decoder {
 // ---------------------------------------------------------------------------
 
 /// Dispatches an AVX2 decode function, falling back to scalar for the tail.
-#[allow(clippy::type_complexity)]
-#[inline]
-fn dispatch_decode(
-    input: &[u8],
-    out: &mut [u8],
-    simd_fn: unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>,
-) -> Option<usize> {
-    let (consumed, mut written) = unsafe { simd_fn(input, out)? };
-
-    if consumed < input.len() {
-        let tail_written = decode_base64_fast(&input[consumed..], &mut out[written..])?;
-        written += tail_written;
-    }
-    Some(written)
-}
-
 // ---------------------------------------------------------------------------
 // Decode engine — all functions require `target_feature(enable = "avx2")`
 // ---------------------------------------------------------------------------
@@ -164,33 +164,33 @@ mod decode_engine {
                     0x00,
                     0x13,
                     0x04,
-                    0xbf_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xb9_u8 as i8,
-                    0xb9_u8 as i8,
+                    b2i(0xbf),
+                    b2i(0xbf),
+                    b2i(0xb9),
+                    b2i(0xb9),
                     0x00,
                     0x10,
-                    0xc3_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xb9_u8 as i8,
-                    0xb9_u8 as i8,
+                    b2i(0xc3),
+                    b2i(0xbf),
+                    b2i(0xbf),
+                    b2i(0xb9),
+                    b2i(0xb9),
                     0x00,
                     0x00,
                     0x00,
                     0x13,
                     0x04,
-                    0xbf_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xb9_u8 as i8,
-                    0xb9_u8 as i8,
+                    b2i(0xbf),
+                    b2i(0xbf),
+                    b2i(0xb9),
+                    b2i(0xb9),
                     0x00,
                     0x10,
-                    0xc3_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xb9_u8 as i8,
-                    0xb9_u8 as i8,
+                    b2i(0xc3),
+                    b2i(0xbf),
+                    b2i(0xbf),
+                    b2i(0xb9),
+                    b2i(0xb9),
                 ),
                 check_asso: _mm256_setr_epi8(
                     0x0d, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x03, 0x07, 0x0b,
@@ -198,38 +198,38 @@ mod decode_engine {
                     0x03, 0x07, 0x0b, 0x0b, 0x0b, 0x0f,
                 ),
                 check_values: _mm256_setr_epi8(
-                    0x80_u8 as i8,
-                    0x80_u8 as i8,
-                    0x80_u8 as i8,
-                    0x80_u8 as i8,
-                    0xcf_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xd5_u8 as i8,
-                    0xa6_u8 as i8,
-                    0xb5_u8 as i8,
-                    0x86_u8 as i8,
-                    0xd1_u8 as i8,
-                    0x80_u8 as i8,
-                    0xb1_u8 as i8,
-                    0x80_u8 as i8,
-                    0x91_u8 as i8,
-                    0x80_u8 as i8,
-                    0x80_u8 as i8,
-                    0x80_u8 as i8,
-                    0x80_u8 as i8,
-                    0x80_u8 as i8,
-                    0xcf_u8 as i8,
-                    0xbf_u8 as i8,
-                    0xd5_u8 as i8,
-                    0xa6_u8 as i8,
-                    0xb5_u8 as i8,
-                    0x86_u8 as i8,
-                    0xd1_u8 as i8,
-                    0x80_u8 as i8,
-                    0xb1_u8 as i8,
-                    0x80_u8 as i8,
-                    0x91_u8 as i8,
-                    0x80_u8 as i8,
+                    b2i(0x80),
+                    b2i(0x80),
+                    b2i(0x80),
+                    b2i(0x80),
+                    b2i(0xcf),
+                    b2i(0xbf),
+                    b2i(0xd5),
+                    b2i(0xa6),
+                    b2i(0xb5),
+                    b2i(0x86),
+                    b2i(0xd1),
+                    b2i(0x80),
+                    b2i(0xb1),
+                    b2i(0x80),
+                    b2i(0x91),
+                    b2i(0x80),
+                    b2i(0x80),
+                    b2i(0x80),
+                    b2i(0x80),
+                    b2i(0x80),
+                    b2i(0xcf),
+                    b2i(0xbf),
+                    b2i(0xd5),
+                    b2i(0xa6),
+                    b2i(0xb5),
+                    b2i(0x86),
+                    b2i(0xd1),
+                    b2i(0x80),
+                    b2i(0xb1),
+                    b2i(0x80),
+                    b2i(0x91),
+                    b2i(0x80),
                 ),
                 cpv: _mm256_set_epi8(
                     -1, -1, -1, -1, 12, 13, 14, 8, 9, 10, 4, 5, 6, 0, 1, 2, -1, -1, -1, -1, 12, 13,
@@ -287,6 +287,8 @@ mod decode_engine {
     /// Map a single 32-byte Base64 input vector.
     ///
     /// Port of C macro `BITMAP256V8_6`.
+    /// Retained for parity with the C reference; the current hot loop
+    /// inlines this logic directly.
     #[allow(dead_code)]
     #[inline]
     #[target_feature(enable = "avx2")]
@@ -300,6 +302,8 @@ mod decode_engine {
     /// Bit-pack a single mapped vector.
     ///
     /// Port of C macro `BITPACK256V8_6`.
+    /// Retained for parity with the C reference; the current hot loop
+    /// inlines this logic directly.
     #[allow(dead_code)]
     #[inline]
     #[target_feature(enable = "avx2")]
@@ -508,20 +512,6 @@ mod decode_engine {
     // Utility
     // -----------------------------------------------------------------------
 
-    /// Return `(consumed, written)` offsets from the base pointers.
-    #[inline]
-    fn offsets(
-        in_ptr: *const u8,
-        out_ptr: *const u8,
-        in_base: *const u8,
-        out_base: *const u8,
-    ) -> (usize, usize) {
-        (
-            in_ptr as usize - in_base as usize,
-            out_ptr as usize - out_base as usize,
-        )
-    }
-
     // -----------------------------------------------------------------------
     // Public entry points
     // -----------------------------------------------------------------------
@@ -605,7 +595,7 @@ mod decode_engine {
             return None;
         }
 
-        Some(offsets(ip, op, in_base, out_base))
+        Some(crate::engine::offsets(ip, op, in_base, out_base))
     }
 
     /// Strict AVX2 decode (B64CHECK mode — all vectors validated).
@@ -641,7 +631,16 @@ mod decode_engine {
             let mut iu0 = _mm256_loadu_si256(ip as *const __m256i);
             let mut iu1 = _mm256_loadu_si256(ip.add(32) as *const __m256i);
 
-            // Double-DS128 unrolled loop: 256 input -> 192 output
+            // 3x-DS128 unrolled loop: 384 input -> 288 output
+            while ip < in_.sub(64 + 3 * 128 + 4) {
+                process_ds128_strict(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
+                process_ds128_strict(ip, op, 128, &mut iu0, &mut iu1, &t, &mut vx);
+                process_ds128_strict(ip, op, 256, &mut iu0, &mut iu1, &t, &mut vx);
+                ip = ip.add(384);
+                op = op.add(288);
+            }
+
+            // 2x-DS128 drain: 256 input -> 192 output
             while ip < in_.sub(64 + 2 * 128 + 4) {
                 process_ds128_strict(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
                 process_ds128_strict(ip, op, 128, &mut iu0, &mut iu1, &t, &mut vx);
@@ -685,13 +684,14 @@ mod decode_engine {
             return None;
         }
 
-        Some(offsets(ip, op, in_base, out_base))
+        Some(crate::engine::offsets(ip, op, in_base, out_base))
     }
 }
 
 // ---------------------------------------------------------------------------
 // Encode engine — all functions require `target_feature(enable = "avx2")`
 // ---------------------------------------------------------------------------
+#[allow(unsafe_op_in_unsafe_fn)]
 mod avx2_engine {
     use super::*;
 
@@ -732,13 +732,13 @@ mod avx2_engine {
         );
         v = _mm256_shuffle_epi8(v, shuf);
 
-        let mask1 = _mm256_set1_epi32(0x0fc0fc00u32 as i32);
-        let mulhi = _mm256_set1_epi32(0x04000040u32 as i32);
+        let mask1 = _mm256_set1_epi32(w2i(0x0fc0fc00));
+        let mulhi = _mm256_set1_epi32(w2i(0x04000040));
         let mut t0 = _mm256_and_si256(v, mask1);
         t0 = fast_vpmulhuw(t0, mulhi);
 
-        let mask2 = _mm256_set1_epi32(0x003f03f0u32 as i32);
-        let mullo = _mm256_set1_epi32(0x01000010u32 as i32);
+        let mask2 = _mm256_set1_epi32(w2i(0x003f03f0));
+        let mullo = _mm256_set1_epi32(w2i(0x01000010));
         let mut t1 = _mm256_and_si256(v, mask2);
         t1 = fast_vpmullw(t1, mullo);
 
@@ -756,6 +756,15 @@ mod avx2_engine {
         _mm256_add_epi8(v, translated_offset)
     }
 
+    /// Encode raw bytes to Base64 using AVX2, returning `(consumed_input, written_output)`.
+    ///
+    /// Processes 48-byte input blocks (producing 64 Base64 characters each) in
+    /// the AVX2 hot loop. Returns `(0, 0)` if the input is shorter than 56
+    /// bytes, signalling the caller to fall back to the scalar tail encoder.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure the AVX2 CPU feature is available.
     #[inline]
     #[target_feature(enable = "avx2")]
     pub unsafe fn encode_base64_avx2(in_data: &[u8], out_data: &mut [u8]) -> (usize, usize) {

@@ -13,7 +13,7 @@
 //!
 //! [`encode_base64_fast`] encodes raw bytes to standard Base64 (RFC 4648,
 //! alphabet `A-Za-z0-9+/`, `=` padding). It uses a 4 096-entry encode
-//! lookup table ([`TB64LUT_LE`]) that maps every pair of 6-bit indices to
+//! lookup table (`TB64LUT_LE`) that maps every pair of 6-bit indices to
 //! two ASCII characters packed into a `u16`, enabling two characters per
 //! table hit. The main loop processes 48-byte blocks (→ 64 Base64 chars)
 //! with a 16× unrolled macro; a scalar tail handles remainders and padding.
@@ -21,11 +21,11 @@
 //! # Decoder
 //!
 //! [`decode_base64_fast`] decodes standard Base64 back to raw bytes. It uses
-//! a 4×256-entry decode table ([`DEC_LUTS`]) where each of the four
+//! a 4×256-entry decode table (`DEC_LUTS`) where each of the four
 //! character positions within a quad has its own 256-entry sub-table,
 //! pre-shifted so that ORing the four lookups directly yields the three
 //! output bytes packed in a `u32`. Invalid characters map to
-//! [`INVALID_U32`] (`u32::MAX`); this sentinel propagates through the OR
+//! `INVALID_U32` (`u32::MAX`); this sentinel propagates through the OR
 //! chain and is checked once after all blocks are processed.
 //!
 //! The main loop processes 64-char blocks (→ 48 bytes) with a 16× unrolled
@@ -337,6 +337,10 @@ const fn encode_tail_rem2(rem0: u8, rem1: u8, out4: &mut [u8; 4]) {
 /// # Safety
 ///
 /// `out` must point to at least 4 writable bytes. The write is unaligned.
+///
+/// Retained for parity with the C reference; the current SIMD encoders
+/// use slice-based paths instead.
+#[allow(dead_code)]
 #[inline(always)]
 pub(crate) unsafe fn encode_block_3_to_4_ptr(a: u8, b: u8, c: u8, out: *mut u8) {
     let x = enc3_lut(a, b, c);
@@ -510,6 +514,7 @@ unsafe fn write_u32_le_unaligned(p: *mut u8, v: u32) {
 ///
 /// Used in the 4-block decode loop to prefetch the next cache line of input
 /// data. On non-x86 targets this is a no-op.
+#[allow(unused_variables)]
 #[inline(always)]
 fn prefetch_t0_384(p: *const u8) {
     #[cfg(target_arch = "x86")]
@@ -666,7 +671,7 @@ pub(crate) const fn decode_tail_3(last4: &[u8; 4], out3: &mut [u8; 3]) -> Option
 /// into `out[out_off..]`. The intermediate 3-byte buffer avoids bounds-check
 /// noise in the hot caller.
 #[inline(always)]
-pub(crate) fn decode_tail(last4: &[u8; 4], out: &mut [u8], out_off: usize) -> Option<(usize, u32)> {
+fn decode_tail(last4: &[u8; 4], out: &mut [u8], out_off: usize) -> Option<(usize, u32)> {
     let mut tmp = [0u8; 3];
     let (written, cu) = decode_tail_3(last4, &mut tmp)?;
 
@@ -697,7 +702,7 @@ pub(crate) fn decode_tail(last4: &[u8; 4], out: &mut [u8], out_off: usize) -> Op
 ///
 /// # Algorithm
 ///
-/// 1. **Block loop**: 64-char blocks (→ 48 bytes) via [`decode_block_64_to_48`],
+/// 1. **Block loop**: 64-char blocks (→ 48 bytes) via `decode_block_64_to_48`,
 ///    processed 4 at a time with prefetching.
 /// 2. **Quad loop**: remaining 4-char groups (→ 3 bytes each).
 /// 3. **Tail**: the final 4 chars, handling `=` padding.
@@ -829,7 +834,8 @@ mod tests {
 
     #[test]
     fn decode_roundtrip_many_sizes() {
-        for len in 0..=8192usize {
+        let max_len = if cfg!(miri) { 1024usize } else { 8192usize };
+        for len in 0..=max_len {
             let mut input = vec![0u8; len];
             fill_xorshift(&mut input);
 

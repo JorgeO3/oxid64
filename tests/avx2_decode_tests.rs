@@ -1,6 +1,6 @@
+use oxid64::engine::DecodeOpts;
 use oxid64::engine::avx2::Avx2Decoder;
 use oxid64::engine::scalar::{decode_base64_fast, encode_base64_fast};
-use oxid64::engine::ssse3::DecodeOpts;
 use proptest::prelude::*;
 
 fn decode_scalar_reference(input: &[u8]) -> Option<Vec<u8>> {
