@@ -10,3 +10,5 @@ Cargo.lock
 /rustdec.data*
 /cfastdec.data*
 /base64
+
+/fastbase64
