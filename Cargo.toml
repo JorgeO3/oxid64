@@ -2,6 +2,20 @@
 name = "oxid64"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
+description = "High-performance Base64 codec with SIMD acceleration (SSSE3, AVX2, AVX-512 VBMI, NEON, WASM SIMD128)"
+license = "MIT"
+repository = "https://github.com/jorgeolvr/oxid64"
+readme = "README.md"
+keywords = ["base64", "simd", "encoding", "decoding", "avx2"]
+categories = ["encoding", "no-std"]
+
+include = [
+    "/src/**/*.rs",
+    "/Cargo.toml",
+    "/LICENSE",
+    "/README.md",
+]
 
 [dependencies]
 
