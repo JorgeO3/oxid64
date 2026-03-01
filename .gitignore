@@ -9,3 +9,4 @@ Cargo.lock
 /flamegraph.svg
 /rustdec.data*
 /cfastdec.data*
+/base64
