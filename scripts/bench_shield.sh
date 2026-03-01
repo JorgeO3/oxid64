@@ -95,6 +95,7 @@ need_cmd sed
 need_cmd ps
 need_cmd readlink
 need_cmd taskset
+need_cmd runuser
 
 NCPU="$(nproc)"
 
@@ -383,10 +384,14 @@ if [[ "$DO_PRINT_PSR" == "1" ]]; then
 fi
 
 # Run target in a dedicated systemd slice with AllowedCPUs=RUN_CPU.
+# IMPORTANT: even though `systemd-run` is started via sudo/root, execute the
+# benchmark command as the invoking user to avoid root-owned artifacts under
+# target/criterion.
+RUN_AS_USER="${SUDO_USER:-$(id -un)}"
 run_in_bench_slice() {
   sudo systemd-run --quiet --scope --slice=bench.slice \
     -p "AllowedCPUs=${RUN_CPU}" \
-    "$@"
+    runuser -u "${RUN_AS_USER}" -- "$@"
 }
 
 if [[ "$DIRECT_BENCH" == "1" ]]; then
