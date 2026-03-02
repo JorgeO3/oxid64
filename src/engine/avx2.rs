@@ -22,6 +22,23 @@ pub struct Avx2Decoder {
     opts: DecodeOpts,
 }
 
+#[inline]
+fn decoded_len_unchecked(b64: &[u8]) -> Option<usize> {
+    let n = b64.len();
+    if n == 0 {
+        return Some(0);
+    }
+    if (n & 3) != 0 {
+        return None;
+    }
+    let pad = if b64[n - 1] == b'=' {
+        if b64[n - 2] == b'=' { 2 } else { 1 }
+    } else {
+        0
+    };
+    Some((n / 4) * 3 - pad)
+}
+
 impl Avx2Decoder {
     /// Create a new decoder with default options (strict mode).
     #[inline]
@@ -58,6 +75,32 @@ impl Avx2Decoder {
                 decode_engine::decode_avx2 as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
             };
             return super::dispatch_decode(input, out, engine_fn);
+        }
+
+        decode_base64_fast(input, out)
+    }
+
+    /// Decode Base64 `input` into `out` with AVX2 and minimal validation.
+    ///
+    /// This is intended for trusted benchmark/comparison scenarios where
+    /// "no-check" behaviour is desired. Invalid input bytes may not be rejected.
+    #[inline]
+    pub fn decode_to_slice_unchecked(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
+        let out_len = decoded_len_unchecked(input)?;
+        if out.len() < out_len {
+            return None;
+        }
+
+        if std::is_x86_feature_detected!("avx2") {
+            // SAFETY: feature gate checked above.
+            let (consumed, mut written) =
+                unsafe { decode_engine::decode_avx2_unchecked(input, out)? };
+            if consumed < input.len() {
+                // Keep scalar tail for correctness on final partial quad(s).
+                let tail_written = decode_base64_fast(&input[consumed..], &mut out[written..])?;
+                written += tail_written;
+            }
+            return Some(written);
         }
 
         decode_base64_fast(input, out)
@@ -316,6 +359,55 @@ mod decode_engine {
     // DS128 block processors
     // -----------------------------------------------------------------------
 
+    /// Process one DS128 block in unchecked mode.
+    ///
+    /// 128 input bytes -> 96 output bytes, without validity checks.
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn process_ds128_unchecked(
+        ip: *const u8,
+        op: *mut u8,
+        base: usize,
+        iu0: &mut __m256i,
+        iu1: &mut __m256i,
+        t: &DecodeTables,
+    ) {
+        let iv0 = _mm256_loadu_si256(ip.add(64 + base) as *const __m256i);
+        let iv1 = _mm256_loadu_si256(ip.add(64 + base + 32) as *const __m256i);
+
+        let (ou0, _shiftedu0, ou1, _shiftedu1) = bitmap256v8_6x(*iu0, *iu1, t);
+        let (ou0, ou1) = bitpack256v8_6x(ou0, ou1, t.cpv);
+
+        *iu0 = _mm256_loadu_si256(ip.add(64 + base + 64) as *const __m256i);
+        *iu1 = _mm256_loadu_si256(ip.add(64 + base + 96) as *const __m256i);
+
+        let ob = base / 4 * 3;
+        _mm_storeu_si128(op.add(ob) as *mut __m128i, _mm256_castsi256_si128(ou0));
+        _mm_storeu_si128(
+            op.add(ob + 12) as *mut __m128i,
+            _mm256_extracti128_si256(ou0, 1),
+        );
+        _mm_storeu_si128(op.add(ob + 24) as *mut __m128i, _mm256_castsi256_si128(ou1));
+        _mm_storeu_si128(
+            op.add(ob + 36) as *mut __m128i,
+            _mm256_extracti128_si256(ou1, 1),
+        );
+
+        let (ov0, _shiftedv0, ov1, _shiftedv1) = bitmap256v8_6x(iv0, iv1, t);
+        let (ov0, ov1) = bitpack256v8_6x(ov0, ov1, t.cpv);
+
+        _mm_storeu_si128(op.add(ob + 48) as *mut __m128i, _mm256_castsi256_si128(ov0));
+        _mm_storeu_si128(
+            op.add(ob + 60) as *mut __m128i,
+            _mm256_extracti128_si256(ov0, 1),
+        );
+        _mm_storeu_si128(op.add(ob + 72) as *mut __m128i, _mm256_castsi256_si128(ov1));
+        _mm_storeu_si128(
+            op.add(ob + 84) as *mut __m128i,
+            _mm256_extracti128_si256(ov1, 1),
+        );
+    }
+
     /// Process one DS128 block in non-strict (CHECK0) mode.
     ///
     /// 128 input bytes -> 96 output bytes. Direct port of the C `DS128(_i_)`
@@ -460,6 +552,65 @@ mod decode_engine {
     // -----------------------------------------------------------------------
     // Public entry points
     // -----------------------------------------------------------------------
+
+    /// Unchecked AVX2 decode (trusted input, no character validation in SIMD loop).
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure AVX2 is available.
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn decode_avx2_unchecked(
+        in_data: &[u8],
+        out_data: &mut [u8],
+    ) -> Option<(usize, usize)> {
+        let inlen = in_data.len();
+        if inlen & 3 != 0 {
+            return None;
+        }
+
+        let in_base = in_data.as_ptr();
+        let out_base = out_data.as_mut_ptr();
+        let in_ = in_base.add(inlen);
+        let mut ip = in_base;
+        let mut op = out_base;
+
+        let t = DecodeTables::new();
+
+        if inlen >= 64 + 128 + 4 {
+            let mut iu0 = _mm256_loadu_si256(ip as *const __m256i);
+            let mut iu1 = _mm256_loadu_si256(ip.add(32) as *const __m256i);
+
+            while ip < in_.sub(64 + 2 * 128 + 4) {
+                process_ds128_unchecked(ip, op, 0, &mut iu0, &mut iu1, &t);
+                process_ds128_unchecked(ip, op, 128, &mut iu0, &mut iu1, &t);
+                ip = ip.add(256);
+                op = op.add(192);
+            }
+
+            if ip < in_.sub(64 + 128 + 4) {
+                process_ds128_unchecked(ip, op, 0, &mut iu0, &mut iu1, &t);
+                ip = ip.add(128);
+                op = op.add(96);
+            }
+        } else if inlen == 0 {
+            return Some((0, 0));
+        }
+
+        let delta_asso_lo = _mm256_castsi256_si128(t.delta_asso);
+        let delta_values_lo = _mm256_castsi256_si128(t.delta_values);
+        let cpv_lo = _mm256_castsi256_si128(t.cpv);
+
+        while ip < in_.sub(16 + 4) {
+            let iv = _mm_loadu_si128(ip as *const __m128i);
+            let (ov, _vsh) = map_and_pack_128(iv, delta_asso_lo, delta_values_lo, cpv_lo);
+            _mm_storeu_si128(op as *mut __m128i, ov);
+            ip = ip.add(16);
+            op = op.add(12);
+        }
+
+        Some(crate::engine::offsets(ip, op, in_base, out_base))
+    }
 
     /// Non-strict AVX2 decode (CHECK0 mode).
     ///
@@ -639,6 +790,7 @@ mod decode_engine {
 #[allow(unsafe_op_in_unsafe_fn)]
 mod avx2_engine {
     use super::*;
+    const SHORT_ENCODE_CUTOFF: usize = 16 * 1024;
 
     #[inline]
     #[target_feature(enable = "avx2")]
@@ -701,6 +853,43 @@ mod avx2_engine {
         _mm256_add_epi8(v, translated_offset)
     }
 
+    /// Variant for overlap loads (`ip - 4`) as used by fastbase64.
+    ///
+    /// The lower 128-bit lane uses a shifted byte-selection pattern so one
+    /// 32-byte load covers one 24-byte encode block.
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn process_block_avx2_overlap(mut v: __m256i) -> __m256i {
+        let shuf = _mm256_set_epi8(
+            10, 11, 9, 10, 7, 8, 6, 7, 4, 5, 3, 4, 1, 2, 0, 1, 14, 15, 13, 14, 11, 12, 10, 11, 8,
+            9, 7, 8, 5, 6, 4, 5,
+        );
+        v = _mm256_shuffle_epi8(v, shuf);
+
+        let mask1 = _mm256_set1_epi32(w2i(0x0fc0fc00));
+        let mulhi = _mm256_set1_epi32(w2i(0x04000040));
+        let mut t0 = _mm256_and_si256(v, mask1);
+        t0 = fast_vpmulhuw(t0, mulhi);
+
+        let mask2 = _mm256_set1_epi32(w2i(0x003f03f0));
+        let mullo = _mm256_set1_epi32(w2i(0x01000010));
+        let mut t1 = _mm256_and_si256(v, mask2);
+        t1 = fast_vpmullw(t1, mullo);
+
+        v = _mm256_or_si256(t0, t1);
+
+        let offsets = _mm256_set_epi8(
+            0, 0, -16, -19, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, 71, 65, 0, 0, -16, -19, -4, -4,
+            -4, -4, -4, -4, -4, -4, -4, -4, 71, 65,
+        );
+
+        let mut vidx = _mm256_subs_epu8(v, _mm256_set1_epi8(51));
+        vidx = _mm256_sub_epi8(vidx, _mm256_cmpgt_epi8(v, _mm256_set1_epi8(25)));
+
+        let translated_offset = _mm256_shuffle_epi8(offsets, vidx);
+        _mm256_add_epi8(v, translated_offset)
+    }
+
     /// Encode raw bytes to Base64 using AVX2, returning `(consumed_input, written_output)`.
     ///
     /// Processes 48-byte input blocks (producing 64 Base64 characters each) in
@@ -718,10 +907,59 @@ mod avx2_engine {
 
         debug_assert!(out_data.len() >= in_data.len().div_ceil(3) * 4);
 
-        if in_data.len() < 56 {
+        if in_data.len() < 28 {
             return (0, 0);
         }
-        let limit = in_data.len() - 56;
+        let limit = in_data.len() - 28;
+
+        // Short-input fast-path: first block with normal gather, then overlap
+        // loads (`ip - 4`) for cheaper per-block load/pack overhead.
+        if in_data.len() <= SHORT_ENCODE_CUTOFF {
+            let in_ptr = in_data.as_ptr();
+            let out_ptr = out_data.as_mut_ptr();
+
+            let v0_128 = _mm_loadu_si128(in_ptr as *const __m128i);
+            let v0 = _mm256_inserti128_si256(
+                _mm256_castsi128_si256(v0_128),
+                _mm_loadu_si128(in_ptr.add(12) as *const __m128i),
+                1,
+            );
+            let o0 = process_block_avx2(v0);
+            _mm256_storeu_si256(out_ptr as *mut __m256i, o0);
+            in_idx = 24;
+            out_idx = 32;
+
+            while in_idx + 72 <= limit {
+                let ip = in_ptr.add(in_idx - 4);
+                let op = out_ptr.add(out_idx);
+
+                let o0 = process_block_avx2_overlap(_mm256_loadu_si256(ip as *const __m256i));
+                let o1 =
+                    process_block_avx2_overlap(_mm256_loadu_si256(ip.add(24) as *const __m256i));
+                let o2 =
+                    process_block_avx2_overlap(_mm256_loadu_si256(ip.add(48) as *const __m256i));
+                let o3 =
+                    process_block_avx2_overlap(_mm256_loadu_si256(ip.add(72) as *const __m256i));
+
+                _mm256_storeu_si256(op as *mut __m256i, o0);
+                _mm256_storeu_si256(op.add(32) as *mut __m256i, o1);
+                _mm256_storeu_si256(op.add(64) as *mut __m256i, o2);
+                _mm256_storeu_si256(op.add(96) as *mut __m256i, o3);
+
+                in_idx += 96;
+                out_idx += 128;
+            }
+
+            while in_idx <= limit {
+                let ip = in_ptr.add(in_idx - 4);
+                let op = out_ptr.add(out_idx);
+                let ov = process_block_avx2_overlap(_mm256_loadu_si256(ip as *const __m256i));
+                _mm256_storeu_si256(op as *mut __m256i, ov);
+                in_idx += 24;
+                out_idx += 32;
+            }
+            return (in_idx, out_idx);
+        }
 
         // Unroll: 192 bytes in -> 256 bytes out
         if in_data.len() >= 248 {
