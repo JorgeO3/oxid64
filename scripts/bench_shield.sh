@@ -31,6 +31,7 @@ set -euo pipefail
 
 ISO_CPUS="1"
 RUN_CPU_OVERRIDE=""
+RUN_AS_USER_OVERRIDE=""
 
 DO_PERF="0"
 DO_NO_TURBO="0"
@@ -56,6 +57,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --cpu) ISO_CPUS="${2:-}"; shift 2;;
     --run-cpu) RUN_CPU_OVERRIDE="${2:-}"; shift 2;;
+    --artifact-user) RUN_AS_USER_OVERRIDE="${2:-}"; shift 2;;
 
     --performance) DO_PERF="1"; shift;;
     --no-turbo) DO_NO_TURBO="1"; shift;;
@@ -98,6 +100,32 @@ need_cmd taskset
 need_cmd runuser
 
 NCPU="$(nproc)"
+if [[ -n "$RUN_AS_USER_OVERRIDE" ]]; then
+  RUN_AS_USER="$RUN_AS_USER_OVERRIDE"
+elif [[ -n "${SUDO_USER:-}" ]]; then
+  RUN_AS_USER="${SUDO_USER}"
+elif [[ "$(id -u)" -eq 0 ]]; then
+  # Root shell (without sudo): infer from workspace owner to avoid root-owned artifacts.
+  RUN_AS_USER="$(stat -c '%U' "$PWD" 2>/dev/null || echo root)"
+else
+  RUN_AS_USER="$(id -un)"
+fi
+
+if ! id -u "$RUN_AS_USER" >/dev/null 2>&1; then
+  die "artifact user '$RUN_AS_USER' does not exist (use --artifact-user <user>)"
+fi
+
+if [[ "$RUN_AS_USER" == "root" ]]; then
+  die "artifact user resolved to root; pass --artifact-user <non-root-user> to avoid root-owned target/criterion files"
+fi
+
+run_as_user() {
+  if [[ "$(id -un)" == "${RUN_AS_USER}" ]]; then
+    "$@"
+  else
+    runuser -u "${RUN_AS_USER}" -- "$@"
+  fi
+}
 
 # Parse isolated CPU list: "1" or "1,2"
 IFS=',' read -r -a ISO_ARR <<< "$ISO_CPUS"
@@ -387,7 +415,6 @@ fi
 # IMPORTANT: even though `systemd-run` is started via sudo/root, execute the
 # benchmark command as the invoking user to avoid root-owned artifacts under
 # target/criterion.
-RUN_AS_USER="${SUDO_USER:-$(id -un)}"
 run_in_bench_slice() {
   sudo systemd-run --quiet --scope --slice=bench.slice \
     -p "AllowedCPUs=${RUN_CPU}" \
@@ -404,7 +431,7 @@ if [[ "$DIRECT_BENCH" == "1" ]]; then
   done
 
   echo "==> Building bench target (no-run): $DIRECT_BENCH_NAME"
-  cargo bench --bench "$DIRECT_BENCH_NAME" --no-run >/dev/null
+  run_as_user cargo bench --bench "$DIRECT_BENCH_NAME" --no-run >/dev/null
 
   EXE="$(ls -t "target/release/deps/${DIRECT_BENCH_NAME}-"* 2>/dev/null | head -n 1 || true)"
   [[ -n "$EXE" && -x "$EXE" ]] || die "could not find bench executable for '${DIRECT_BENCH_NAME}' under target/release/deps"

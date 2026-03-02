@@ -206,6 +206,85 @@ fn compile_b64check_variants(turbo_dir: &Path) {
     );
 }
 
+fn compile_lemire_fastbase64(manifest_dir: &str) {
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is not set"));
+    let fastbase64_dir = Path::new(manifest_dir).join("fastbase64");
+    let include_dir = fastbase64_dir.join("include");
+    let src_dir = fastbase64_dir.join("src");
+    let cc = env::var("CC").unwrap_or_else(|_| "cc".to_string());
+    let ar = env::var("AR").unwrap_or_else(|_| "ar".to_string());
+
+    if !fastbase64_dir.exists() {
+        println!(
+            "cargo:warning=fastbase64 directory not found at {}, skipping fastbase64 benchmarks",
+            fastbase64_dir.display()
+        );
+        return;
+    }
+
+    let obj_avx2 = out_dir.join("fastavxbase64.o");
+    let obj_chromium = out_dir.join("chromiumbase64.o");
+    let lib_path = out_dir.join("liblemire_fastbase64.a");
+
+    println!(
+        "cargo:rerun-if-changed={}",
+        src_dir.join("fastavxbase64.c").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        src_dir.join("chromiumbase64.c").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        include_dir.join("fastavxbase64.h").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        include_dir.join("chromiumbase64.h").display()
+    );
+
+    run_checked({
+        let mut cmd = Command::new(&cc);
+        cmd.arg("-O3")
+            .arg("-DNDEBUG")
+            .arg("-fPIC")
+            .arg("-mavx2")
+            .arg("-I")
+            .arg(&include_dir)
+            .arg("-c")
+            .arg(src_dir.join("fastavxbase64.c"))
+            .arg("-o")
+            .arg(&obj_avx2);
+        cmd
+    });
+
+    run_checked({
+        let mut cmd = Command::new(&cc);
+        cmd.arg("-O3")
+            .arg("-DNDEBUG")
+            .arg("-fPIC")
+            .arg("-I")
+            .arg(&include_dir)
+            .arg("-c")
+            .arg(src_dir.join("chromiumbase64.c"))
+            .arg("-o")
+            .arg(&obj_chromium);
+        cmd
+    });
+
+    run_checked({
+        let mut cmd = Command::new(&ar);
+        cmd.arg("crs")
+            .arg(&lib_path)
+            .arg(&obj_avx2)
+            .arg(&obj_chromium);
+        cmd
+    });
+
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
+    println!("cargo:rustc-link-lib=static=lemire_fastbase64");
+}
+
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let turbo_dir = Path::new(&manifest_dir).join("Turbo-Base64");
@@ -223,4 +302,6 @@ fn main() {
     compile_nb64check_variants(&turbo_dir);
     // Build a third copy with B64CHECK enabled (full checks) for strict apples-to-apples.
     compile_b64check_variants(&turbo_dir);
+    // Build Lemire fastbase64 AVX2 + chromium fallback for benchmark comparisons.
+    compile_lemire_fastbase64(&manifest_dir);
 }
