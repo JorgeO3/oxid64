@@ -40,10 +40,18 @@
 //! NEON interleaved loads (`vld3q_u8`) and a direct 64-byte `vqtbl4q_u8`
 //! forward lookup, falling back to scalar for the tail.
 
-use super::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
+use super::scalar::{decode_base64_fast, encode_base64_fast};
 use super::{Base64Decoder, DecodeOpts};
+use crate::engine::common::remaining;
+use crate::engine::common::{assert_encode_capacity, prepare_decode_output};
+use crate::engine::models::neon as verify_model;
 
 use core::arch::aarch64::*;
+
+#[inline]
+fn has_neon_backend() -> bool {
+    std::arch::is_aarch64_feature_detected!("neon")
+}
 
 /// NEON Base64 decoder and encoder (AArch64).
 ///
@@ -78,15 +86,15 @@ impl NeonDecoder {
     /// Dispatches to the strict or non-strict NEON engine based on
     /// `self.opts.strict`, falling back to scalar for the tail.
     ///
-    /// Returns `None` if the input contains invalid Base64 characters.
+    /// In strict mode, returns `None` if the input contains invalid Base64.
+    ///
+    /// In non-strict mode, this is a trusted-input `CHECK0` contract and does
+    /// not validate every SIMD-processed block.
     #[inline]
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
-        let out_len = decoded_len_strict(input)?;
-        if out.len() < out_len {
-            return None;
-        }
+        let _out_len = prepare_decode_output(input, out)?;
 
-        if std::arch::is_aarch64_feature_detected!("neon") {
+        if has_neon_backend() {
             let engine_fn = if self.opts.strict {
                 decode_engine::decode_neon_strict
                     as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
@@ -105,18 +113,12 @@ impl NeonDecoder {
     /// for the tail. The encoder is independent of [`DecodeOpts`].
     #[inline]
     pub fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
-        let needed = input.len().div_ceil(3) * 4;
-        assert!(
-            out.len() >= needed,
-            "encode_to_slice output too small: need {}, have {}",
-            needed,
-            out.len()
-        );
+        assert_encode_capacity(input.len(), out.len());
 
         let mut consumed = 0usize;
         let mut written = 0usize;
 
-        if std::arch::is_aarch64_feature_detected!("neon") {
+        if has_neon_backend() {
             // SAFETY: feature gate checked above.
             let (c, w) = unsafe { encode_engine::encode_base64_neon(input, out) };
             consumed = c;
@@ -154,11 +156,11 @@ impl Base64Decoder for NeonDecoder {
 // Shared decode dispatch
 // ---------------------------------------------------------------------------
 
-/// Dispatches a NEON decode function, falling back to scalar for the tail.
-///
-/// The SIMD engine processes as many full blocks as possible, returning
-/// `(consumed, written)`. This helper calls the scalar fallback for any
-/// remaining bytes.
+// Dispatches a NEON decode function, falling back to scalar for the tail.
+//
+// The SIMD engine processes as many full blocks as possible, returning
+// `(consumed, written)`. This helper calls the scalar fallback for any
+// remaining bytes.
 // ---------------------------------------------------------------------------
 // Decode LUT — 128-byte ASCII → 6-bit value (0xFF = invalid)
 // ---------------------------------------------------------------------------
@@ -192,7 +194,7 @@ static DECODE_LUT: [u8; 128] = [
       33,   34,   35,   36,   37,   38,   39,   40,
     // 0x70 – 0x7F  p-z  { | } ~ DEL
       41,   42,   43,   44,   45,   46,   47,   48,
-      49,   50,   51, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    49,   50,   51, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 ];
 
 // ---------------------------------------------------------------------------
@@ -219,7 +221,7 @@ mod decode_engine {
         vlut1: uint8x16x4_t,
         cv40: uint8x16_t,
     ) -> uint8x16_t {
-        let upper = vqtbl4q_u8(vlut1, veorq_u8(v, cv40));
+        let upper = vqtbx4q_u8(vdupq_n_u8(0xFF), vlut1, veorq_u8(v, cv40));
         vqtbx4q_u8(upper, vlut0, v)
     }
 
@@ -321,6 +323,7 @@ mod decode_engine {
         let ip_start = in_data.as_ptr();
         let op_start = out_data.as_mut_ptr();
         let inlen = in_data.len();
+        let in_end = ip_start.add(inlen);
 
         // Load the two halves of the 128-byte decode LUT.
         let vlut0 = vld1q_u8_x4(DECODE_LUT.as_ptr());
@@ -333,9 +336,8 @@ mod decode_engine {
 
         // DN=256: process 256 input bytes → 192 output bytes per iteration.
         const DN: usize = 256;
-        let main_end = ip_start.add(inlen & !(DN - 1));
 
-        while ip < main_end {
+        while remaining(ip, in_end) > DN {
             // Block 0 (ip + 0): CHECK1 in non-strict → skip check
             let (d0, d1, d2, d3) = decode_block(ip, op, vlut0, vlut1, cv40);
             // Block 1 (ip + 64): CHECK1 → skip check
@@ -366,9 +368,10 @@ mod decode_engine {
             op = op.add((DN / 4) * 3);
         }
 
-        // Cleanup loop: 64 bytes at a time.
-        let cleanup_end = ip_start.add(inlen & !(64 - 1));
-        while ip < cleanup_end {
+        // Cleanup loop: 64 bytes at a time, always leaving the final block for
+        // scalar so the semantic last quantum (and any padding) is never
+        // handled by the raw SIMD block decoder.
+        while remaining(ip, in_end) > verify_model::DECODE_BLOCK_INPUT_BYTES {
             let (d0, d1, d2, d3) = decode_block(ip, op, vlut0, vlut1, cv40);
             xv = b64chk(d0, d1, d2, d3, xv);
             ip = ip.add(64);
@@ -380,9 +383,7 @@ mod decode_engine {
             return None;
         }
 
-        let consumed = ip.offset_from(ip_start) as usize;
-        let written = op.offset_from(op_start) as usize;
-        Some((consumed, written))
+        Some(crate::engine::offsets(ip, op, ip_start, op_start))
     }
 
     /// NEON Base64 decode — **strict** mode.
@@ -403,6 +404,7 @@ mod decode_engine {
         let ip_start = in_data.as_ptr();
         let op_start = out_data.as_mut_ptr();
         let inlen = in_data.len();
+        let in_end = ip_start.add(inlen);
 
         // Load the two halves of the 128-byte decode LUT.
         let vlut0 = vld1q_u8_x4(DECODE_LUT.as_ptr());
@@ -415,9 +417,8 @@ mod decode_engine {
 
         // DN=256: process 256 input bytes → 192 output bytes per iteration.
         const DN: usize = 256;
-        let main_end = ip_start.add(inlen & !(DN - 1));
 
-        while ip < main_end {
+        while remaining(ip, in_end) > DN {
             // Block 0 (ip + 0): validate
             let (d0, d1, d2, d3) = decode_block(ip, op, vlut0, vlut1, cv40);
             xv = b64chk(d0, d1, d2, d3, xv);
@@ -438,9 +439,10 @@ mod decode_engine {
             op = op.add((DN / 4) * 3);
         }
 
-        // Cleanup loop: 64 bytes at a time.
-        let cleanup_end = ip_start.add(inlen & !(64 - 1));
-        while ip < cleanup_end {
+        // Cleanup loop: 64 bytes at a time, always leaving the final block for
+        // scalar so the semantic last quantum (and any padding) is never
+        // handled by the raw SIMD block decoder.
+        while remaining(ip, in_end) > verify_model::DECODE_BLOCK_INPUT_BYTES {
             let (d0, d1, d2, d3) = decode_block(ip, op, vlut0, vlut1, cv40);
             xv = b64chk(d0, d1, d2, d3, xv);
             ip = ip.add(64);
@@ -452,9 +454,7 @@ mod decode_engine {
             return None;
         }
 
-        let consumed = ip.offset_from(ip_start) as usize;
-        let written = op.offset_from(op_start) as usize;
-        Some((consumed, written))
+        Some(crate::engine::offsets(ip, op, ip_start, op_start))
     }
 }
 
@@ -508,7 +508,7 @@ mod encode_engine {
         let ip_start = in_data.as_ptr();
         let op_start = out_data.as_mut_ptr();
         let inlen = in_data.len();
-        let outlen = inlen.div_ceil(3) * 4;
+        let in_end = ip_start.add(inlen);
 
         let vlut = vld1q_u8_x4(ENCODE_LUT.as_ptr());
         let cv3f = vdupq_n_u8(0x3F);
@@ -518,26 +518,20 @@ mod encode_engine {
 
         // EN=128: process 128 output bytes (96 input bytes) per iteration,
         // split into 2× 48→64 sub-blocks.
-        const EN: usize = 128;
-        let main_end = op_start.add(outlen & !(EN - 1));
-
-        while op < main_end {
+        while verify_model::can_run_encode_pair(remaining(ip, in_end)) {
             encode_block(ip, op, vlut, cv3f);
             encode_block(ip.add(48), op.add(64), vlut, cv3f);
-            ip = ip.add((EN / 4) * 3);
-            op = op.add(EN);
+            ip = ip.add(verify_model::ENCODE_PAIR_INPUT_BYTES);
+            op = op.add(verify_model::ENCODE_PAIR_OUTPUT_BYTES);
         }
 
         // Cleanup loop: 64 output bytes (48 input bytes) at a time.
-        let cleanup_end = op_start.add(outlen & !(64 - 1));
-        while op < cleanup_end {
+        while verify_model::can_run_encode_block(remaining(ip, in_end)) {
             encode_block(ip, op, vlut, cv3f);
-            ip = ip.add(48);
-            op = op.add(64);
+            ip = ip.add(verify_model::ENCODE_BLOCK_INPUT_BYTES);
+            op = op.add(verify_model::ENCODE_BLOCK_OUTPUT_BYTES);
         }
 
-        let consumed = ip.offset_from(ip_start) as usize;
-        let written = op.offset_from(op_start) as usize;
-        (consumed, written)
+        crate::engine::offsets(ip, op, ip_start, op_start)
     }
 }

@@ -1,0 +1,11 @@
+#![no_main]
+
+mod common;
+
+use common::{assert_strict_decode_matches_scalar, clamp_input};
+use libfuzzer_sys::fuzz_target;
+
+fuzz_target!(|data: &[u8]| {
+    let input = clamp_input(data);
+    assert_strict_decode_matches_scalar(input);
+});

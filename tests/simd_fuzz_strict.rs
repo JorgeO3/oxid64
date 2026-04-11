@@ -7,50 +7,74 @@ const CANARY: u8 = 0xA5;
 const PAD: usize = 64;
 
 fn interesting_len() -> impl Strategy<Value = usize> {
-    prop_oneof![
-        Just(0usize),
-        Just(1),
-        Just(2),
-        Just(3),
-        Just(4),
-        Just(15),
-        Just(16),
-        Just(17),
-        Just(23),
-        Just(24),
-        Just(25),
-        Just(31),
-        Just(32),
-        Just(33),
-        Just(47),
-        Just(48),
-        Just(49),
-        Just(63),
-        Just(64),
-        Just(65),
-        Just(95),
-        Just(96),
-        Just(97),
-        Just(127),
-        Just(128),
-        Just(129),
-        Just(191),
-        Just(192),
-        Just(193),
-        Just(255),
-        Just(256),
-        Just(257),
-        Just(511),
-        Just(512),
-        Just(513),
-        Just(1023),
-        Just(1024),
-        Just(1025),
-        Just(4095),
-        Just(4096),
-        Just(4097),
-        0usize..8192usize,
-    ]
+    if cfg!(miri) {
+        // Under Miri, keep inputs small to avoid excessive interpretation time.
+        prop_oneof![
+            Just(0usize),
+            Just(1),
+            Just(2),
+            Just(3),
+            Just(4),
+            Just(15),
+            Just(16),
+            Just(17),
+            Just(31),
+            Just(32),
+            Just(33),
+            Just(48),
+            Just(63),
+            Just(64),
+            Just(65),
+            0usize..128usize,
+        ]
+        .boxed()
+    } else {
+        prop_oneof![
+            Just(0usize),
+            Just(1),
+            Just(2),
+            Just(3),
+            Just(4),
+            Just(15),
+            Just(16),
+            Just(17),
+            Just(23),
+            Just(24),
+            Just(25),
+            Just(31),
+            Just(32),
+            Just(33),
+            Just(47),
+            Just(48),
+            Just(49),
+            Just(63),
+            Just(64),
+            Just(65),
+            Just(95),
+            Just(96),
+            Just(97),
+            Just(127),
+            Just(128),
+            Just(129),
+            Just(191),
+            Just(192),
+            Just(193),
+            Just(255),
+            Just(256),
+            Just(257),
+            Just(511),
+            Just(512),
+            Just(513),
+            Just(1023),
+            Just(1024),
+            Just(1025),
+            Just(4095),
+            Just(4096),
+            Just(4097),
+            0usize..8192usize,
+        ]
+        .boxed()
+    }
 }
 
 fn raw_input_strategy() -> impl Strategy<Value = Vec<u8>> {
@@ -115,7 +139,7 @@ fn mutate_to_invalid_b64(encoded: &[u8], idx: usize) -> Vec<u8> {
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 600,
+        cases: if cfg!(miri) { 8 } else { 600 },
         .. ProptestConfig::default()
     })]
 

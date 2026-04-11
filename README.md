@@ -256,10 +256,10 @@ Recomendación de metodología:
 
 SIMD hot paths use `unsafe` intrinsics, so the project tracks safety with layered verification (Swiss-cheese model):
 
-- Kani (proof harnesses): in progress
+- Kani (proof harnesses): active for small helper contracts
 - Miri (UB checks): in progress
 - MSan (uninitialized-memory checks): in progress
-- Differential fuzzing (`proptest`): active
+- Differential fuzzing (`proptest` + `cargo-fuzz` smoke targets): active
 
 Details and commands:
 - `doc/safety_verification.md`

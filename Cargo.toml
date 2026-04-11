@@ -20,13 +20,30 @@ include = [
 [dependencies]
 
 [dev-dependencies]
-proptest = "1.4"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = "0.5.1"
+proptest = "1.4"
 
 [[bench]]
 name = "base64_bench"
 harness = false
 
+[[bin]]
+name = "miri_smoke"
+path = "src/bin/miri_smoke.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "msan_smoke"
+path = "src/bin/msan_smoke.rs"
+test = false
+bench = false
+
 [profile.release]
 opt-level = 3
 debug = "full"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

@@ -64,10 +64,18 @@
 
 pub mod engine;
 
+#[cfg(kani)]
+mod verify;
+
 // Re-export the primary public API at the crate root.
 pub use engine::{Base64Decoder, Decoder};
 
 /// Compute the Base64-encoded length for `n` raw input bytes (with padding).
+///
+/// # Panics
+///
+/// Panics if the result would overflow `usize` (possible on 32-bit targets
+/// with inputs larger than ~3 GiB).
 ///
 /// # Examples
 ///

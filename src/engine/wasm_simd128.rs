@@ -35,9 +35,20 @@
 //! using WASM SIMD128 vectorised bit-manipulation, falling back to scalar for
 //! the tail. The encoder is independent of [`DecodeOpts`].
 
-use super::scalar::{decoded_len_strict, encode_base64_fast};
-use super::{Base64Decoder, DecodeOpts, b2i};
+#[cfg(target_feature = "simd128")]
+use super::b2i;
+use super::scalar::{decode_base64_fast, encode_base64_fast};
+use super::{Base64Decoder, DecodeOpts};
+use crate::engine::common::{assert_encode_capacity, prepare_decode_output};
+#[cfg(target_feature = "simd128")]
+use crate::engine::common::{
+    can_advance, can_process_ds64, can_process_ds64_double, can_process_tail16, remaining,
+    safe_in_end_4,
+};
+#[cfg(target_feature = "simd128")]
+use crate::engine::models::wasm_simd128 as verify_model;
 
+#[cfg(target_feature = "simd128")]
 use core::arch::wasm32::*;
 
 /// WASM SIMD128 Base64 decoder and encoder.
@@ -70,38 +81,49 @@ impl WasmSimd128Decoder {
 
     /// Decode Base64 `input` into `out`, returning the number of bytes written.
     ///
-    /// Returns `None` if the input contains invalid Base64 characters.
+    /// In strict mode, returns `None` if the input contains invalid Base64.
+    ///
+    /// In non-strict mode, this is a trusted-input `CHECK0` contract and does
+    /// not validate every SIMD-processed lane.
     #[inline]
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
-        let out_len = decoded_len_strict(input)?;
-        if out.len() < out_len {
-            return None;
+        let _out_len = prepare_decode_output(input, out)?;
+
+        #[cfg(target_feature = "simd128")]
+        {
+            let engine_fn = if self.opts.strict {
+                decode_engine::decode_wasm_strict
+                    as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
+            } else {
+                decode_engine::decode_wasm as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
+            };
+            return super::dispatch_decode(input, out, engine_fn);
         }
 
-        let engine_fn = if self.opts.strict {
-            decode_engine::decode_wasm_strict
-                as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
-        } else {
-            decode_engine::decode_wasm as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
-        };
-        super::dispatch_decode(input, out, engine_fn)
+        #[cfg(not(target_feature = "simd128"))]
+        {
+            let _ = self.opts.strict;
+        }
+
+        decode_base64_fast(input, out)
     }
 
     /// Encode raw bytes to Base64 ASCII, returning the number of bytes written.
     #[inline]
     pub fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
-        let needed = input.len().div_ceil(3) * 4;
-        assert!(
-            out.len() >= needed,
-            "encode_to_slice output too small: need {}, have {}",
-            needed,
-            out.len()
-        );
+        assert_encode_capacity(input.len(), out.len());
 
-        let (consumed, mut written) = unsafe {
-            // SAFETY: WASM SIMD128 is a compile-time feature; availability is
-            // guaranteed by #[target_feature(enable = "simd128")] on the callee.
-            encode_engine::encode_base64_wasm(input, out)
+        let (consumed, mut written) = {
+            #[cfg(target_feature = "simd128")]
+            {
+                // SAFETY: this path is compiled only when `simd128` is enabled.
+                unsafe { encode_engine::encode_base64_wasm(input, out) }
+            }
+
+            #[cfg(not(target_feature = "simd128"))]
+            {
+                (0, 0)
+            }
         };
 
         if consumed < input.len() {
@@ -139,53 +161,10 @@ impl Base64Decoder for WasmSimd128Decoder {
 // ---------------------------------------------------------------------------
 // Decode engine — all functions require `target_feature(enable = "simd128")`
 // ---------------------------------------------------------------------------
+#[cfg(target_feature = "simd128")]
 #[allow(unsafe_op_in_unsafe_fn)]
 mod decode_engine {
     use super::*;
-
-    // -----------------------------------------------------------------------
-    // pmaddubsw emulation
-    // -----------------------------------------------------------------------
-
-    /// Emulate SSSE3 `_mm_maddubs_epi16(a, b)` using relaxed-simd.
-    ///
-    /// `i16x8_relaxed_dot_i8x16_i7x16(a, b)` multiplies unsigned bytes from
-    /// `a` by signed bytes from `b` (which must be in [-128, 127] but the
-    /// "i7x16" name hints the second operand should be in [-64, 63] for
-    /// guaranteed determinism — our constant `0x01400140` has bytes 1 and 64,
-    /// both in [0, 127], so this is safe).
-    #[cfg(target_feature = "relaxed-simd")]
-    #[inline]
-    #[target_feature(enable = "simd128")]
-    unsafe fn maddubs(a: v128, b: v128) -> v128 {
-        i16x8_relaxed_dot_i8x16_i7x16(a, b)
-    }
-
-    /// Emulate SSSE3 `_mm_maddubs_epi16(a, b)` using standard SIMD128 ops.
-    ///
-    /// Multiplies unsigned 8-bit lanes of `a` by signed 8-bit lanes of `b`,
-    /// then horizontally adds adjacent 16-bit products.
-    #[cfg(not(target_feature = "relaxed-simd"))]
-    #[inline]
-    #[target_feature(enable = "simd128")]
-    unsafe fn maddubs(a: v128, b: v128) -> v128 {
-        // Even lanes (0, 2, 4, ...): multiply and keep in 16-bit
-        let mask_even = i8x16(-1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0);
-
-        // Extract even bytes of a (unsigned) and b (signed) into 16-bit lanes
-        let a_even = v128_and(a, mask_even); // zero odd bytes
-        let b_even = v128_and(b, mask_even);
-        let prod_even = i16x8_mul(a_even, b_even); // u8*i8 fits in i16 since a_even <= 255, b_even is already zero-extended in high byte
-
-        // Extract odd bytes by shifting right 8 bits per 16-bit lane
-        let a_odd = u16x8_shr(a, 8);
-        // For signed odd bytes, arithmetic shift right
-        let b_odd = i16x8_shr(b, 8);
-        let prod_odd = i16x8_mul(a_odd, b_odd);
-
-        // Sum even and odd products
-        i16x8_add(prod_even, prod_odd)
-    }
 
     /// SIMD lookup tables used by the Turbo-Base64 mapping and validation
     /// pipeline. Mirrors the SSSE3 `DecodeTables` using WASM `v128` type.
@@ -194,9 +173,6 @@ mod decode_engine {
         delta_values: v128,
         check_asso: v128,
         check_values: v128,
-        cpv: v128,
-        madd_mul_1: v128,
-        madd_mul_2: v128,
     }
 
     impl DecodeTables {
@@ -249,12 +225,6 @@ mod decode_engine {
                     b2i(0x91),
                     b2i(0x80),
                 ),
-                // _mm_set_epi8 is reverse order: _mm_set_epi8(15,14,...,1,0)
-                // cpv was: _mm_set_epi8(-1,-1,-1,-1, 12,13,14, 8,9,10, 4,5,6, 0,1,2)
-                // In setr order (i8x16): byte 0 = 2, byte 1 = 1, ..., byte 15 = -1
-                cpv: i8x16(2, 1, 0, 6, 5, 4, 10, 9, 8, 14, 13, 12, -1, -1, -1, -1),
-                madd_mul_1: u32x4_splat(0x01400140),
-                madd_mul_2: u32x4_splat(0x00011000),
             }
         }
     }
@@ -262,6 +232,43 @@ mod decode_engine {
     // -----------------------------------------------------------------------
     // Core SIMD helpers
     // -----------------------------------------------------------------------
+
+    /// Emulate SSSE3 `pshufb` semantics on WASM swizzle primitives.
+    ///
+    /// For control bytes with bit 7 clear, SSSE3 uses the low nibble as the
+    /// table index. For control bytes with bit 7 set, the result is zero.
+    #[inline]
+    #[target_feature(enable = "simd128")]
+    unsafe fn pshufb_compat(table: v128, ctrl: v128) -> v128 {
+        let idx = v128_and(ctrl, u8x16_splat(0x0f));
+        let shuffled = i8x16_swizzle(table, idx);
+        let masked_out = i8x16_lt(ctrl, i8x16_splat(0));
+        v128_andnot(shuffled, masked_out)
+    }
+
+    /// Pack sixteen mapped 6-bit values into twelve decoded bytes.
+    #[inline]
+    #[target_feature(enable = "simd128")]
+    unsafe fn pack_mapped_sextets(sextets: v128) -> v128 {
+        let mut mapped = [0u8; 16];
+        let mut out = [0u8; 16];
+        v128_store(mapped.as_mut_ptr() as *mut v128, sextets);
+
+        for chunk in 0..4 {
+            let base = chunk * 4;
+            let out_base = chunk * 3;
+            let a = mapped[base];
+            let b = mapped[base + 1];
+            let c = mapped[base + 2];
+            let d = mapped[base + 3];
+
+            out[out_base] = (a << 2) | (b >> 4);
+            out[out_base + 1] = (b << 4) | (c >> 2);
+            out[out_base + 2] = (c << 6) | d;
+        }
+
+        v128_load(out.as_ptr() as *const v128)
+    }
 
     /// Map a 16-byte Base64 input vector to 12 decoded bytes and compute the
     /// `shifted = iv >> 3` value needed by the check stage.
@@ -271,12 +278,9 @@ mod decode_engine {
     #[target_feature(enable = "simd128")]
     unsafe fn map_and_pack(iv: v128, t: &DecodeTables) -> (v128, v128) {
         let shifted = u32x4_shr(iv, 3);
-        let delta_hash = u8x16_avgr(i8x16_swizzle(t.delta_asso, iv), shifted);
-        let mut ov = i8x16_add(i8x16_swizzle(t.delta_values, delta_hash), iv);
-        let merge_ab_bc = maddubs(ov, t.madd_mul_1);
-        ov = i32x4_dot_i16x8(merge_ab_bc, t.madd_mul_2);
-        ov = i8x16_swizzle(ov, t.cpv);
-        (ov, shifted)
+        let delta_hash = u8x16_avgr(pshufb_compat(t.delta_asso, iv), shifted);
+        let sextets = i8x16_add(pshufb_compat(t.delta_values, delta_hash), iv);
+        (pack_mapped_sextets(sextets), shifted)
     }
 
     /// Like [`map_and_pack`] but accepts a pre-computed `shifted` value.
@@ -286,11 +290,9 @@ mod decode_engine {
     #[inline]
     #[target_feature(enable = "simd128")]
     unsafe fn map_and_pack_with_shifted(iv: v128, shifted: v128, t: &DecodeTables) -> v128 {
-        let delta_hash = u8x16_avgr(i8x16_swizzle(t.delta_asso, iv), shifted);
-        let mut ov = i8x16_add(i8x16_swizzle(t.delta_values, delta_hash), iv);
-        let merge_ab_bc = maddubs(ov, t.madd_mul_1);
-        ov = i32x4_dot_i16x8(merge_ab_bc, t.madd_mul_2);
-        i8x16_swizzle(ov, t.cpv)
+        let delta_hash = u8x16_avgr(pshufb_compat(t.delta_asso, iv), shifted);
+        let sextets = i8x16_add(pshufb_compat(t.delta_values, delta_hash), iv);
+        pack_mapped_sextets(sextets)
     }
 
     /// Validate one input vector. Returns a vector where lanes with the sign
@@ -298,8 +300,8 @@ mod decode_engine {
     #[inline]
     #[target_feature(enable = "simd128")]
     unsafe fn check_vec(iv: v128, shifted: v128, t: &DecodeTables) -> v128 {
-        let check_hash = u8x16_avgr(i8x16_swizzle(t.check_asso, iv), shifted);
-        i8x16_add_sat(i8x16_swizzle(t.check_values, check_hash), iv)
+        let check_hash = u8x16_avgr(pshufb_compat(t.check_asso, iv), shifted);
+        i8x16_add_sat(pshufb_compat(t.check_values, check_hash), iv)
     }
 
     /// OR the check result of `iv` into `error_mask` (non-strict accumulator).
@@ -426,18 +428,6 @@ mod decode_engine {
     // Helpers
     // -----------------------------------------------------------------------
 
-    /// Compute the safe end pointer: last position where we can read 4 bytes
-    /// without going out of bounds.
-    #[inline]
-    fn safe_in_end(in_data: &[u8]) -> *const u8 {
-        if in_data.len() >= 4 {
-            // SAFETY: pointer arithmetic within the allocated object.
-            unsafe { in_data.as_ptr().add(in_data.len() - 4) }
-        } else {
-            in_data.as_ptr()
-        }
-    }
-
     // -----------------------------------------------------------------------
     // Public entry points
     // -----------------------------------------------------------------------
@@ -458,30 +448,23 @@ mod decode_engine {
         let mut in_ptr = in_base;
         let mut out_ptr = out_base;
 
-        let safe_end = safe_in_end(in_data);
+        let safe_end = safe_in_end_4(in_data);
 
         // No alignment preamble needed — WASM loads/stores have no alignment
         // requirements and are always efficient at any offset.
 
-        if (safe_end as usize).saturating_sub(in_ptr as usize) < 32
-            || (out_end as usize).saturating_sub(out_ptr as usize) < 16
-        {
+        if !can_advance(in_ptr, safe_end, 32, out_ptr, out_end, 16) {
             return Some(crate::engine::offsets(in_ptr, out_ptr, in_base, out_base));
         }
 
         let t = DecodeTables::new();
         let mut error_mask = i8x16_splat(0);
 
-        // Double-DS64 unrolled main loop (128 input bytes -> 96 output bytes)
-        if in_ptr as usize + 32 + 64 <= safe_end as usize
-            && out_ptr as usize + 48 + 4 <= out_end as usize
-        {
+        if can_process_ds64(in_ptr, safe_end, out_ptr, out_end) {
             let mut iu0 = v128_load(in_ptr as *const v128);
             let mut iu1 = v128_load(in_ptr.add(16) as *const v128);
 
-            while in_ptr as usize + 32 + 2 * 64 <= safe_end as usize
-                && out_ptr as usize + 96 + 4 <= out_end as usize
-            {
+            while can_process_ds64_double(in_ptr, safe_end, out_ptr, out_end) {
                 process_ds64_partial(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_mask);
                 process_ds64_partial(
                     in_ptr.add(64),
@@ -495,10 +478,7 @@ mod decode_engine {
                 out_ptr = out_ptr.add(96);
             }
 
-            // Single-DS64 drain
-            while in_ptr as usize + 32 + 64 <= safe_end as usize
-                && out_ptr as usize + 48 + 4 <= out_end as usize
-            {
+            while can_process_ds64(in_ptr, safe_end, out_ptr, out_end) {
                 process_ds64_partial(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_mask);
                 in_ptr = in_ptr.add(64);
                 out_ptr = out_ptr.add(48);
@@ -506,9 +486,7 @@ mod decode_engine {
         }
 
         // Single-vector tail loop
-        while in_ptr as usize + 16 <= safe_end as usize
-            && out_ptr as usize + 12 + 4 <= out_end as usize
-        {
+        while can_process_tail16(in_ptr, safe_end, out_ptr, out_end) {
             let iv = v128_load(in_ptr as *const v128);
             let (ov, shifted) = map_and_pack(iv, &t);
             v128_store(out_ptr as *mut v128, ov);
@@ -542,27 +520,20 @@ mod decode_engine {
         let mut in_ptr = in_base;
         let mut out_ptr = out_base;
 
-        let safe_end = safe_in_end(in_data);
+        let safe_end = safe_in_end_4(in_data);
 
-        if (safe_end as usize).saturating_sub(in_ptr as usize) < 32
-            || (out_end as usize).saturating_sub(out_ptr as usize) < 16
-        {
+        if !can_advance(in_ptr, safe_end, 32, out_ptr, out_end, 16) {
             return Some(crate::engine::offsets(in_ptr, out_ptr, in_base, out_base));
         }
 
         let t = DecodeTables::new();
         let mut error_bits = 0u16;
 
-        // Double-DS64 unrolled main loop
-        if in_ptr as usize + 32 + 64 <= safe_end as usize
-            && out_ptr as usize + 48 + 4 <= out_end as usize
-        {
+        if can_process_ds64(in_ptr, safe_end, out_ptr, out_end) {
             let mut iu0 = v128_load(in_ptr as *const v128);
             let mut iu1 = v128_load(in_ptr.add(16) as *const v128);
 
-            while in_ptr as usize + 32 + 2 * 64 <= safe_end as usize
-                && out_ptr as usize + 96 + 4 <= out_end as usize
-            {
+            while can_process_ds64_double(in_ptr, safe_end, out_ptr, out_end) {
                 process_ds64_strict(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_bits);
                 process_ds64_strict(
                     in_ptr.add(64),
@@ -576,10 +547,7 @@ mod decode_engine {
                 out_ptr = out_ptr.add(96);
             }
 
-            // Single-DS64 drain
-            while in_ptr as usize + 32 + 64 <= safe_end as usize
-                && out_ptr as usize + 48 + 4 <= out_end as usize
-            {
+            while can_process_ds64(in_ptr, safe_end, out_ptr, out_end) {
                 process_ds64_strict(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_bits);
                 in_ptr = in_ptr.add(64);
                 out_ptr = out_ptr.add(48);
@@ -587,9 +555,7 @@ mod decode_engine {
         }
 
         // Single-vector tail loop
-        while in_ptr as usize + 16 <= safe_end as usize
-            && out_ptr as usize + 12 + 4 <= out_end as usize
-        {
+        while can_process_tail16(in_ptr, safe_end, out_ptr, out_end) {
             let iv = v128_load(in_ptr as *const v128);
             let (ov, shifted) = map_and_pack(iv, &t);
             v128_store(out_ptr as *mut v128, ov);
@@ -609,6 +575,7 @@ mod decode_engine {
 // ---------------------------------------------------------------------------
 // Encode engine — all functions require `target_feature(enable = "simd128")`
 // ---------------------------------------------------------------------------
+#[cfg(target_feature = "simd128")]
 #[allow(unsafe_op_in_unsafe_fn)]
 mod encode_engine {
     use super::*;
@@ -723,7 +690,7 @@ mod encode_engine {
 
         // No alignment preamble needed for WASM.
 
-        if (in_end as usize).saturating_sub(in_ptr as usize) < 52 {
+        if remaining(in_ptr, in_end) < verify_model::ENCODE_SIMD_ENTRY_THRESHOLD {
             return (0, 0);
         }
 
@@ -741,7 +708,7 @@ mod encode_engine {
         let cmpgt_val = i8x16_splat(25);
 
         // Main loop: 96 input bytes → 128 output bytes (8 × 12→16 blocks, 4 pairs)
-        while in_ptr as usize + 108 <= in_end as usize {
+        while verify_model::can_run_encode_main(remaining(in_ptr, in_end)) {
             let u0 = v128_load(in_ptr as *const v128);
             let u1 = v128_load(in_ptr.add(12) as *const v128);
 
@@ -787,7 +754,7 @@ mod encode_engine {
         }
 
         // 48-byte drain: 48 input → 64 output (4 blocks, 2 pairs)
-        while in_ptr as usize + 60 <= in_end as usize {
+        while verify_model::can_run_encode_drain(remaining(in_ptr, in_end)) {
             let u0 = v128_load(in_ptr as *const v128);
             let u1 = v128_load(in_ptr.add(12) as *const v128);
 
@@ -813,7 +780,7 @@ mod encode_engine {
         }
 
         // 12-byte tail: one block at a time
-        while in_ptr as usize + 16 <= in_end as usize {
+        while verify_model::can_run_encode_tail(remaining(in_ptr, in_end)) {
             let v = v128_load(in_ptr as *const v128);
             let (res, _) = process_block_x2(
                 v,

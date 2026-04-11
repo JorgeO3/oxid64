@@ -6,18 +6,21 @@
 
 pub mod scalar;
 
+#[doc(hidden)]
+pub mod common;
+#[doc(hidden)]
+pub mod models;
+#[cfg(target_arch = "aarch64")]
+pub mod neon;
+#[cfg(target_arch = "wasm32")]
+pub mod wasm_simd128;
+
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub mod avx2;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub mod avx512vbmi;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub mod ssse3;
-
-#[cfg(target_arch = "aarch64")]
-pub mod neon;
-
-#[cfg(target_arch = "wasm32")]
-pub mod wasm_simd128;
 
 // ---------------------------------------------------------------------------
 // Byte-to-signed helpers (zero-cost cast for SIMD intrinsic arguments)
@@ -57,7 +60,8 @@ pub(crate) const fn d2i(v: u64) -> i64 {
 /// available before calling this function.
 #[inline]
 #[allow(clippy::type_complexity)]
-pub(crate) fn dispatch_decode(
+#[doc(hidden)]
+pub fn dispatch_decode(
     input: &[u8],
     out: &mut [u8],
     simd_fn: unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>,
@@ -84,10 +88,7 @@ pub(crate) fn offsets(
     in_base: *const u8,
     out_base: *const u8,
 ) -> (usize, usize) {
-    (
-        in_ptr as usize - in_base as usize,
-        out_ptr as usize - out_base as usize,
-    )
+    common::decode_offsets(in_ptr, out_ptr as *mut u8, in_base, out_base as *mut u8)
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +112,10 @@ pub(crate) fn offsets(
 pub struct DecodeOpts {
     /// When `true`, every input vector is validated (CHECK1 mode).
     /// When `false`, only 1 of every N vectors is validated (CHECK0 mode).
+    ///
+    /// Warning: `strict: false` is a trusted-input / fast-path contract, not a
+    /// fully validating decoder. It exists to match Turbo-Base64's `CHECK0`
+    /// family of APIs. Use `strict: true` for untrusted input.
     pub strict: bool,
 }
 
@@ -144,7 +149,10 @@ impl Default for DecodeOpts {
 pub trait Base64Decoder {
     /// Decode Base64 `input` into `out`, returning the number of bytes written.
     ///
-    /// Returns `None` if the input contains invalid Base64.
+    /// Returns `None` if the active decoder contract rejects the input.
+    ///
+    /// For strict decoders this means invalid Base64 is rejected. Trusted-input
+    /// `non-strict` / `CHECK0` modes may intentionally accept invalid bytes.
     ///
     /// # Examples
     ///
@@ -312,7 +320,7 @@ impl Decoder {
     pub fn detect() -> Self {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
-            if std::arch::is_x86_feature_detected!("avx512vbmi") {
+            if avx512vbmi::has_avx512vbmi() {
                 return Self::Avx512Vbmi(avx512vbmi::Avx512VbmiDecoder::new());
             }
             if std::arch::is_x86_feature_detected!("avx2") {

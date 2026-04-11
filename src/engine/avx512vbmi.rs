@@ -5,8 +5,10 @@
 //! core and a 3-instruction encode core operating on 512-bit vectors.
 //! Requires Ice Lake or later.
 
-use super::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
-use super::{Base64Decoder, DecodeOpts, d2i, w2i};
+use super::scalar::{decode_base64_fast, encode_base64_fast};
+use super::{d2i, w2i, Base64Decoder, DecodeOpts};
+use crate::engine::common::{assert_encode_capacity, prepare_decode_output, remaining};
+use crate::engine::models::avx512vbmi as verify_model;
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
@@ -23,6 +25,13 @@ use core::arch::x86_64::*;
 /// - `Avx512VbmiDecoder::with_opts(opts)` — custom configuration.
 pub struct Avx512VbmiDecoder {
     opts: DecodeOpts,
+}
+
+#[inline]
+pub(crate) fn has_avx512vbmi() -> bool {
+    std::is_x86_feature_detected!("avx512f")
+        && std::is_x86_feature_detected!("avx512bw")
+        && std::is_x86_feature_detected!("avx512vbmi")
 }
 
 impl Avx512VbmiDecoder {
@@ -48,12 +57,9 @@ impl Avx512VbmiDecoder {
     /// Returns `None` if the input contains invalid Base64 characters.
     #[inline]
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
-        let out_len = decoded_len_strict(input)?;
-        if out.len() < out_len {
-            return None;
-        }
+        let _out_len = prepare_decode_output(input, out)?;
 
-        if std::is_x86_feature_detected!("avx512vbmi") {
+        if has_avx512vbmi() {
             let engine_fn = if self.opts.strict {
                 decode_engine::decode_avx512_strict
                     as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
@@ -73,18 +79,12 @@ impl Avx512VbmiDecoder {
     /// scalar for the tail.
     #[inline]
     pub fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
-        let needed = input.len().div_ceil(3) * 4;
-        assert!(
-            out.len() >= needed,
-            "encode_to_slice output too small: need {}, have {}",
-            needed,
-            out.len()
-        );
+        assert_encode_capacity(input.len(), out.len());
 
         let mut consumed = 0usize;
         let mut written = 0usize;
 
-        if std::is_x86_feature_detected!("avx512vbmi") {
+        if has_avx512vbmi() {
             // SAFETY: feature gate checked above.
             let (c, w) = unsafe { encode_engine::encode_base64_avx512(input, out) };
             consumed = c;
@@ -128,6 +128,7 @@ impl Base64Decoder for Avx512VbmiDecoder {
 // ---------------------------------------------------------------------------
 #[allow(unsafe_op_in_unsafe_fn)]
 mod decode_engine {
+    #[allow(unused_imports)]
     use super::*;
 
     /// 128-byte decode lookup table (two 64-byte halves for `permutex2var`).
@@ -422,7 +423,7 @@ mod decode_engine {
             let mut iu1 = _mm512_loadu_si512(ip.add(64) as *const __m512i);
 
             // Double-DS256 unrolled loop: 512 input -> 384 output
-            while ip < in_.sub(128 + 2 * 256 + 4) {
+            while remaining(ip, in_) > 128 + 2 * 256 + 4 {
                 process_ds256_partial(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
                 process_ds256_partial(ip, op, 256, &mut iu0, &mut iu1, &t, &mut vx);
                 ip = ip.add(512);
@@ -430,7 +431,7 @@ mod decode_engine {
             }
 
             // Single-DS256 drain: 256 input -> 192 output
-            if ip < in_.sub(128 + 256 + 4) {
+            if remaining(ip, in_) > 128 + 256 + 4 {
                 process_ds256_partial(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
                 ip = ip.add(256);
                 op = op.add(192);
@@ -440,7 +441,7 @@ mod decode_engine {
         }
 
         // Single-vector 64-byte tail loop
-        while ip < in_.sub(64 + 16 + 4) {
+        while remaining(ip, in_) > 64 + 16 + 4 {
             let iv = _mm512_loadu_si512(ip as *const __m512i);
             let ov = bitmap512v8_6(iv, &t);
             // CHECK0: validate in tail
@@ -493,7 +494,7 @@ mod decode_engine {
             let mut iu1 = _mm512_loadu_si512(ip.add(64) as *const __m512i);
 
             // Double-DS256 unrolled loop: 512 input -> 384 output
-            while ip < in_.sub(128 + 2 * 256 + 4) {
+            while remaining(ip, in_) > 128 + 2 * 256 + 4 {
                 process_ds256_strict(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
                 process_ds256_strict(ip, op, 256, &mut iu0, &mut iu1, &t, &mut vx);
                 ip = ip.add(512);
@@ -501,7 +502,7 @@ mod decode_engine {
             }
 
             // Single-DS256 drain
-            if ip < in_.sub(128 + 256 + 4) {
+            if remaining(ip, in_) > 128 + 256 + 4 {
                 process_ds256_strict(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
                 ip = ip.add(256);
                 op = op.add(192);
@@ -511,7 +512,7 @@ mod decode_engine {
         }
 
         // Single-vector 64-byte tail loop (all validated in strict)
-        while ip < in_.sub(64 + 16 + 4) {
+        while remaining(ip, in_) > 64 + 16 + 4 {
             let iv = _mm512_loadu_si512(ip as *const __m512i);
             let ov = bitmap512v8_6(iv, &t);
             vx = b64chk512(iv, ov, vx);
@@ -535,6 +536,12 @@ mod decode_engine {
 // ---------------------------------------------------------------------------
 #[allow(unsafe_op_in_unsafe_fn)]
 mod encode_engine {
+    use super::verify_model::{
+        can_run_double_es256, can_run_single_es256, BLOCK_IN_BYTES, BLOCK_OUT_BYTES,
+        DOUBLE_ES256_BLOCK_STARTS, DOUBLE_ES256_INPUT_BYTES, DOUBLE_ES256_OUTPUT_BYTES,
+        DOUBLE_ES256_PRELOAD_STARTS, ES256_BLOCK_STARTS, ES256_INPUT_BYTES, ES256_OUTPUT_BYTES,
+        SINGLE_ES256_REQUIRED_INPUT,
+    };
     use super::*;
 
     /// Encode a single 512-bit block: 48 input bytes -> 64 output bytes.
@@ -607,83 +614,81 @@ mod encode_engine {
         // 48, 54, 36, 42, 16, 22, 4, 10 within each 64-bit lane.
         let vs = _mm512_set1_epi64(d2i(0x3036242a1016040a));
 
-        // ES256 unrolled loop: 4 blocks per iteration = 192 input -> 256 output
-        // Guard: need 96 (pre-load) + 192 (one ES256) + 4 (tail slack)
-        // outlen check: (96+192+4)*4/3 = ~389 output bytes needed
-        if outlen >= (96 + 192 + 4) * 4 / 3 {
+        // ES256 processes four contiguous 48-byte blocks (192 input -> 256 output).
+        // The single drain needs loads starting at 0, 48, 96 and 144, so the
+        // farthest 64-byte load touches byte 207.
+        if inlen >= SINGLE_ES256_REQUIRED_INPUT {
             let ip = in_data.as_ptr();
             let op = out_data.as_mut_ptr();
+            let in_end = ip.add(inlen);
 
             let mut u0 = _mm512_loadu_si512(ip as *const __m512i);
-            let mut u1 = _mm512_loadu_si512(ip.add(48) as *const __m512i);
-
-            // Double-ES256 loop: 384 input -> 512 output
-            // Guard: need to produce at most out_end - (94+2*192+4)*4/3 bytes
-            let out_end = op.add(outlen);
-            let op_mut = &mut (op.add(out_idx));
-
-            // We use pointer arithmetic like the C code
-            let mut op_cur = *op_mut;
+            let mut u1 = _mm512_loadu_si512(ip.add(BLOCK_IN_BYTES) as *const __m512i);
+            let mut op_cur = op;
             let mut ip_cur = ip;
 
-            while op_cur < out_end.sub((94 + 2 * 192 + 4) * 4 / 3) {
-                // ES256(0): process u0, u1; preload v0, v1
-                let v0 = _mm512_loadu_si512(ip_cur.add(96) as *const __m512i);
-                let v1 = _mm512_loadu_si512(ip_cur.add(96 + 48) as *const __m512i);
+            // Double-ES256 loop: 384 input -> 512 output. The planner keeps
+            // block starts contiguous (0, 48, 96, 144, 192, 240, 288, 336) and
+            // preloads the next iteration at 384 and 432.
+            while can_run_double_es256(remaining(ip_cur, in_end)) {
+                let v0 = _mm512_loadu_si512(ip_cur.add(ES256_BLOCK_STARTS[2]) as *const __m512i);
+                let v1 = _mm512_loadu_si512(ip_cur.add(ES256_BLOCK_STARTS[3]) as *const __m512i);
 
                 u0 = encode_block_512(u0, vf, vs, vlut);
                 u1 = encode_block_512(u1, vf, vs, vlut);
                 _mm512_storeu_si512(op_cur as *mut __m512i, u0);
-                _mm512_storeu_si512(op_cur.add(64) as *mut __m512i, u1);
+                _mm512_storeu_si512(op_cur.add(BLOCK_OUT_BYTES) as *mut __m512i, u1);
 
-                // Preload next u0, u1
-                u0 = _mm512_loadu_si512(ip_cur.add(96 + 96) as *const __m512i);
-                u1 = _mm512_loadu_si512(ip_cur.add(96 + 144) as *const __m512i);
+                u0 = _mm512_loadu_si512(ip_cur.add(DOUBLE_ES256_BLOCK_STARTS[4]) as *const __m512i);
+                u1 = _mm512_loadu_si512(ip_cur.add(DOUBLE_ES256_BLOCK_STARTS[5]) as *const __m512i);
 
-                // Process v0, v1
                 let v0 = encode_block_512(v0, vf, vs, vlut);
                 let v1 = encode_block_512(v1, vf, vs, vlut);
-                _mm512_storeu_si512(op_cur.add(128) as *mut __m512i, v0);
-                _mm512_storeu_si512(op_cur.add(192) as *mut __m512i, v1);
+                _mm512_storeu_si512(op_cur.add(2 * BLOCK_OUT_BYTES) as *mut __m512i, v0);
+                _mm512_storeu_si512(op_cur.add(3 * BLOCK_OUT_BYTES) as *mut __m512i, v1);
 
-                // ES256(1): process u0, u1; preload v0, v1
-                let v0 = _mm512_loadu_si512(ip_cur.add(96 + 192 + 96) as *const __m512i);
-                let v1 = _mm512_loadu_si512(ip_cur.add(96 + 192 + 96 + 48) as *const __m512i);
+                let v0 =
+                    _mm512_loadu_si512(ip_cur.add(DOUBLE_ES256_BLOCK_STARTS[6]) as *const __m512i);
+                let v1 =
+                    _mm512_loadu_si512(ip_cur.add(DOUBLE_ES256_BLOCK_STARTS[7]) as *const __m512i);
 
                 u0 = encode_block_512(u0, vf, vs, vlut);
                 u1 = encode_block_512(u1, vf, vs, vlut);
-                _mm512_storeu_si512(op_cur.add(256) as *mut __m512i, u0);
-                _mm512_storeu_si512(op_cur.add(256 + 64) as *mut __m512i, u1);
+                _mm512_storeu_si512(op_cur.add(4 * BLOCK_OUT_BYTES) as *mut __m512i, u0);
+                _mm512_storeu_si512(op_cur.add(5 * BLOCK_OUT_BYTES) as *mut __m512i, u1);
 
-                u0 = _mm512_loadu_si512(ip_cur.add(96 + 192 + 96 + 96) as *const __m512i);
-                u1 = _mm512_loadu_si512(ip_cur.add(96 + 192 + 96 + 144) as *const __m512i);
+                u0 = _mm512_loadu_si512(
+                    ip_cur.add(DOUBLE_ES256_PRELOAD_STARTS[0]) as *const __m512i
+                );
+                u1 = _mm512_loadu_si512(
+                    ip_cur.add(DOUBLE_ES256_PRELOAD_STARTS[1]) as *const __m512i
+                );
 
                 let v0 = encode_block_512(v0, vf, vs, vlut);
                 let v1 = encode_block_512(v1, vf, vs, vlut);
-                _mm512_storeu_si512(op_cur.add(256 + 128) as *mut __m512i, v0);
-                _mm512_storeu_si512(op_cur.add(256 + 192) as *mut __m512i, v1);
+                _mm512_storeu_si512(op_cur.add(6 * BLOCK_OUT_BYTES) as *mut __m512i, v0);
+                _mm512_storeu_si512(op_cur.add(7 * BLOCK_OUT_BYTES) as *mut __m512i, v1);
 
-                op_cur = op_cur.add(512);
-                ip_cur = ip_cur.add(512 * 3 / 4);
+                op_cur = op_cur.add(DOUBLE_ES256_OUTPUT_BYTES);
+                ip_cur = ip_cur.add(DOUBLE_ES256_INPUT_BYTES);
             }
 
-            // Single-ES256 drain
-            if op_cur < out_end.sub((96 + 192 + 4) * 4 / 3) {
-                let v0 = _mm512_loadu_si512(ip_cur.add(96) as *const __m512i);
-                let v1 = _mm512_loadu_si512(ip_cur.add(96 + 48) as *const __m512i);
+            if can_run_single_es256(remaining(ip_cur, in_end)) {
+                let v0 = _mm512_loadu_si512(ip_cur.add(ES256_BLOCK_STARTS[2]) as *const __m512i);
+                let v1 = _mm512_loadu_si512(ip_cur.add(ES256_BLOCK_STARTS[3]) as *const __m512i);
 
                 u0 = encode_block_512(u0, vf, vs, vlut);
                 u1 = encode_block_512(u1, vf, vs, vlut);
                 _mm512_storeu_si512(op_cur as *mut __m512i, u0);
-                _mm512_storeu_si512(op_cur.add(64) as *mut __m512i, u1);
+                _mm512_storeu_si512(op_cur.add(BLOCK_OUT_BYTES) as *mut __m512i, u1);
 
                 let v0 = encode_block_512(v0, vf, vs, vlut);
                 let v1 = encode_block_512(v1, vf, vs, vlut);
-                _mm512_storeu_si512(op_cur.add(128) as *mut __m512i, v0);
-                _mm512_storeu_si512(op_cur.add(192) as *mut __m512i, v1);
+                _mm512_storeu_si512(op_cur.add(2 * BLOCK_OUT_BYTES) as *mut __m512i, v0);
+                _mm512_storeu_si512(op_cur.add(3 * BLOCK_OUT_BYTES) as *mut __m512i, v1);
 
-                op_cur = op_cur.add(256);
-                ip_cur = ip_cur.add(256 * 3 / 4);
+                op_cur = op_cur.add(ES256_OUTPUT_BYTES);
+                ip_cur = ip_cur.add(ES256_INPUT_BYTES);
             }
 
             // Compute consumed/written from pointer offsets

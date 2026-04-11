@@ -218,9 +218,17 @@ static DEC_LUTS: DecLuts = DecLuts {
 // ===========================================================================
 
 /// Compute the Base64-encoded length (with padding) for `n` raw bytes.
+///
+/// # Panics
+///
+/// Panics if the result would overflow `usize` (possible on 32-bit targets
+/// with inputs larger than ~3 GiB).
 #[inline(always)]
 pub const fn encoded_len(n: usize) -> usize {
-    n.div_ceil(3) * 4
+    match n.div_ceil(3).checked_mul(4) {
+        Some(v) => v,
+        None => panic!("encoded_len: output length overflows usize"),
+    }
 }
 
 /// Pack two LUT entries (chars 0–1 and chars 2–3) into a single `u32`.
@@ -451,14 +459,32 @@ pub const fn decoded_len_strict(b64: &[u8]) -> Option<usize> {
         return None;
     }
 
+    let mut i = 0usize;
+    while i + 4 < n {
+        if b64[i] == b'=' {
+            return None;
+        }
+        i += 1;
+    }
+
     let pad = if b64[n - 1] == b'=' {
-        if b64[n - 2] == b'=' { 2 } else { 1 }
+        if b64[n - 2] == b'=' {
+            2
+        } else {
+            1
+        }
     } else {
         0
     };
 
-    // Reject illegal `x===` padding pattern.
-    if pad == 2 && b64[n - 3] == b'=' {
+    // The first two bytes of the final quad must always be data (never '=').
+    if b64[n - 4] == b'=' || b64[n - 3] == b'=' {
+        return None;
+    }
+
+    // When pad <= 1, the third byte is also data and must not be '='.
+    // (When pad == 2 this position is already accounted for above.)
+    if pad == 0 && b64[n - 2] == b'=' {
         return None;
     }
 
@@ -618,7 +644,8 @@ fn decode_body_blocks_64_to_48(chunks64: &[[u8; 64]], out48: &mut [[u8; 48]], cu
 /// any non-padding character is invalid. The `decoded_word` is included so
 /// callers can OR it into the error-detection accumulator `cu`.
 #[inline(always)]
-pub(crate) const fn decode_tail_3(last4: &[u8; 4], out3: &mut [u8; 3]) -> Option<(usize, u32)> {
+#[doc(hidden)]
+pub const fn decode_tail_3(last4: &[u8; 4], out3: &mut [u8; 3]) -> Option<(usize, u32)> {
     let a = last4[0];
     let b = last4[1];
     let c = last4[2];
@@ -644,6 +671,11 @@ pub(crate) const fn decode_tail_3(last4: &[u8; 4], out3: &mut [u8; 3]) -> Option
         if (v0 | v1 | v2) == 0xFF {
             return None;
         }
+        // RFC 4648 §3.5: non-zero trailing bits in the last character
+        // are non-canonical; reject them in strict mode.
+        if (v2 & 0x03) != 0 {
+            return None;
+        }
 
         let o0 = ((v0 as u32) << 2) | ((v1 as u32) >> 4);
         let o1 = (((v1 as u32) & 0x0F) << 4) | ((v2 as u32) >> 2);
@@ -657,6 +689,10 @@ pub(crate) const fn decode_tail_3(last4: &[u8; 4], out3: &mut [u8; 3]) -> Option
     let v0 = REV64_INIT[a as usize];
     let v1 = REV64_INIT[b as usize];
     if (v0 | v1) == 0xFF {
+        return None;
+    }
+    // RFC 4648 §3.5: non-zero trailing bits are non-canonical.
+    if (v1 & 0x0F) != 0 {
         return None;
     }
 
@@ -785,83 +821,5 @@ impl Base64Decoder for ScalarDecoder {
     #[inline]
     fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
         encode_base64_fast(input, out)
-    }
-}
-
-// ===========================================================================
-// Tests
-// ===========================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
-
-    /// Fill a buffer with deterministic pseudo-random bytes (xorshift64).
-    fn fill_xorshift(buf: &mut [u8]) {
-        let mut x = 0x1234_5678_9abc_def0_u64;
-        for b in buf {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            *b = x as u8;
-        }
-    }
-
-    #[test]
-    fn matches_rfc4648_vectors() {
-        const CASES: [(&[u8], &str); 7] = [
-            (b"", ""),
-            (b"f", "Zg=="),
-            (b"fo", "Zm8="),
-            (b"foo", "Zm9v"),
-            (b"foob", "Zm9vYg=="),
-            (b"fooba", "Zm9vYmE="),
-            (b"foobar", "Zm9vYmFy"),
-        ];
-
-        for (input, expected) in CASES {
-            let mut out = vec![0u8; input.len().div_ceil(3) * 4 + 8];
-            let written = encode_base64_fast(input, &mut out);
-            assert_eq!(&out[..written], expected.as_bytes(), "encode mismatch");
-
-            let mut decoded = vec![0u8; input.len() + 8];
-            let decoded_len =
-                decode_base64_fast(expected.as_bytes(), &mut decoded).expect("decode failed");
-            assert_eq!(decoded_len, input.len(), "decode len mismatch");
-            assert_eq!(&decoded[..decoded_len], input, "decode mismatch");
-        }
-    }
-
-    #[test]
-    fn decode_roundtrip_many_sizes() {
-        let max_len = if cfg!(miri) { 1024usize } else { 8192usize };
-        for len in 0..=max_len {
-            let mut input = vec![0u8; len];
-            fill_xorshift(&mut input);
-
-            let mut encoded = vec![0u8; len.div_ceil(3) * 4 + 8];
-            let enc_written = encode_base64_fast(&input, &mut encoded);
-            let encoded = &encoded[..enc_written];
-
-            let expected_len = decoded_len_strict(encoded).expect("decoded_len_strict failed");
-            assert_eq!(expected_len, len, "decoded_len mismatch at len={len}");
-
-            let mut out = vec![0u8; len + 8];
-            let written = decode_base64_fast(encoded, &mut out).expect("decode failed");
-            assert_eq!(written, len, "len mismatch at len={len}");
-            assert_eq!(&out[..written], input.as_slice(), "mismatch at len={len}");
-        }
-    }
-
-    #[test]
-    fn decode_rejects_invalid() {
-        let mut out = [0u8; 64];
-        assert_eq!(decoded_len_strict(b""), Some(0));
-        assert!(decode_base64_fast(b"A", &mut out).is_none());
-        assert!(decode_base64_fast(b"AAA", &mut out).is_none());
-        assert!(decode_base64_fast(b"AAAAA", &mut out).is_none());
-        assert!(decode_base64_fast(b"A===", &mut out).is_none());
-        assert!(decode_base64_fast(b"AA*A", &mut out).is_none());
-        assert!(decode_base64_fast(b"AA=A", &mut out).is_none());
     }
 }

@@ -288,14 +288,21 @@ fn compile_lemire_fastbase64(manifest_dir: &str) {
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let turbo_dir = Path::new(&manifest_dir).join("Turbo-Base64");
+    let target = env::var("TARGET").expect("TARGET is not set");
 
-    // Primary C baseline library is built externally via `make` (see Justfile).
-    println!("cargo:rustc-link-search=native={}", turbo_dir.display());
-    println!("cargo:rustc-link-lib=static=tb64");
     println!(
         "cargo:rerun-if-changed={}",
         turbo_dir.join("libtb64.a").display()
     );
+
+    if target.starts_with("wasm32") {
+        println!("cargo:warning=skipping native C benchmark libraries for target {target}");
+        return;
+    }
+
+    // Primary C baseline library is built externally via `make` (see Justfile).
+    println!("cargo:rustc-link-search=native={}", turbo_dir.display());
+    println!("cargo:rustc-link-lib=static=tb64");
 
     // Build a second copy with NB64CHECK enabled and symbol suffixes so both
     // versions can coexist in the same benchmark binary.

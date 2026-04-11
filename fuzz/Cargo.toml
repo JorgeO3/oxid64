@@ -1,0 +1,175 @@
+[package]
+name = "oxid64-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.oxid64]
+path = ".."
+
+[[bin]]
+name = "decode_diff"
+path = "fuzz_targets/decode_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "encode_diff"
+path = "fuzz_targets/encode_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "roundtrip"
+path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "invalid_semantics"
+path = "fuzz_targets/invalid_semantics.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tail_alignment"
+path = "fuzz_targets/tail_alignment.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ssse3_strict_diff"
+path = "fuzz_targets/ssse3_strict_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ssse3_non_strict_schedule"
+path = "fuzz_targets/ssse3_non_strict_schedule.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "avx2_strict_diff"
+path = "fuzz_targets/avx2_strict_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "avx2_non_strict_schedule"
+path = "fuzz_targets/avx2_non_strict_schedule.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "avx2_unchecked_contract"
+path = "fuzz_targets/avx2_unchecked_contract.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "avx2_partial_write_bounds"
+path = "fuzz_targets/avx2_partial_write_bounds.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "avx512_strict_diff"
+path = "fuzz_targets/avx512_strict_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "avx512_non_strict_schedule"
+path = "fuzz_targets/avx512_non_strict_schedule.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "avx512_encode_diff"
+path = "fuzz_targets/avx512_encode_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "avx512_partial_write_bounds"
+path = "fuzz_targets/avx512_partial_write_bounds.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "neon_strict_diff"
+path = "fuzz_targets/neon_strict_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "neon_non_strict_schedule"
+path = "fuzz_targets/neon_non_strict_schedule.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "neon_encode_diff"
+path = "fuzz_targets/neon_encode_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "neon_partial_write_bounds"
+path = "fuzz_targets/neon_partial_write_bounds.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wasm_pshufb_compat"
+path = "fuzz_targets/wasm_pshufb_compat.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wasm_non_strict_schedule"
+path = "fuzz_targets/wasm_non_strict_schedule.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wasm_encode_prefix_model"
+path = "fuzz_targets/wasm_encode_prefix_model.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wasm_partial_write_model"
+path = "fuzz_targets/wasm_partial_write_model.rs"
+test = false
+doc = false
+bench = false
