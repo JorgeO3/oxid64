@@ -1,10 +1,10 @@
 #![allow(warnings)]
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use oxid64::engine::DecodeOpts;
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use oxid64::engine::avx2::Avx2Decoder;
 use oxid64::engine::avx512vbmi::Avx512VbmiDecoder;
 use oxid64::engine::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
 use oxid64::engine::ssse3::Ssse3Decoder;
+use oxid64::engine::DecodeOpts;
 use std::sync::Once;
 
 const TURBO_STYLE_SIZES: [usize; 2] = [10_000, 1_000_000];
@@ -43,7 +43,11 @@ fn has_avx512vbmi() -> bool {
 }
 
 fn yn(b: bool) -> &'static str {
-    if b { "YES" } else { "no" }
+    if b {
+        "YES"
+    } else {
+        "no"
+    }
 }
 
 /// Print a one-time banner showing which ISAs are available on this CPU.
@@ -83,6 +87,11 @@ unsafe extern "C" {
     fn tb64v128dec_b64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64v256dec_b64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64v512dec_b64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+
+    // SIMD decode — default (CHECK0: first vector per DS64 validated)
+    fn tb64v128dec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+    fn tb64v256dec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+    fn tb64v512dec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
 
     // SIMD decode — unchecked (NB64CHECK)
     fn tb64v128dec_nb64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
@@ -315,6 +324,18 @@ pub fn bench_decode_unchecked(c: &mut Criterion) {
         );
 
         group.bench_with_input(
+            BenchmarkId::new("oxid64 avx2 non-strict", size),
+            &encoded,
+            |b, i| {
+                let dec = Avx2Decoder::with_opts(DecodeOpts { strict: false });
+                b.iter(|| {
+                    let _ = dec
+                        .decode_to_slice(black_box(i.as_slice()), black_box(output.as_mut_slice()));
+                });
+            },
+        );
+
+        group.bench_with_input(
             BenchmarkId::new("oxid64 avx2 unchecked", size),
             &encoded,
             |b, i| {
@@ -328,7 +349,69 @@ pub fn bench_decode_unchecked(c: &mut Criterion) {
             },
         );
 
-        // -- tb64 ----------------------------------------------------------
+        if has_avx512vbmi() {
+            group.bench_with_input(
+                BenchmarkId::new("oxid64 avx512 non-strict", size),
+                &encoded,
+                |b, i| {
+                    let dec = Avx512VbmiDecoder::with_opts(DecodeOpts { strict: false });
+                    b.iter(|| {
+                        let _ = dec.decode_to_slice(
+                            black_box(i.as_slice()),
+                            black_box(output.as_mut_slice()),
+                        );
+                    });
+                },
+            );
+        }
+
+        // -- tb64 (CHECK0 / default — partial check, matches oxid64 non-strict)
+
+        group.bench_with_input(
+            BenchmarkId::new("tb64 ssse3 partial-check", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| unsafe {
+                    tb64v128dec(
+                        black_box(i.as_ptr()),
+                        black_box(i.len()),
+                        black_box(output.as_mut_ptr()),
+                    );
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("tb64 avx2 partial-check", size),
+            &encoded,
+            |b, i| {
+                b.iter(|| unsafe {
+                    tb64v256dec(
+                        black_box(i.as_ptr()),
+                        black_box(i.len()),
+                        black_box(output.as_mut_ptr()),
+                    );
+                });
+            },
+        );
+
+        if has_avx512vbmi() {
+            group.bench_with_input(
+                BenchmarkId::new("tb64 avx512 partial-check", size),
+                &encoded,
+                |b, i| {
+                    b.iter(|| unsafe {
+                        tb64v512dec(
+                            black_box(i.as_ptr()),
+                            black_box(i.len()),
+                            black_box(output.as_mut_ptr()),
+                        );
+                    });
+                },
+            );
+        }
+
+        // -- tb64 (NB64CHECK — fully unchecked) ----------------------------
 
         group.bench_with_input(
             BenchmarkId::new("tb64 ssse3 no-check", size),

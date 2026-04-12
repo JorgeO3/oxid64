@@ -5,8 +5,9 @@ pub const TAIL16_OUTPUT_BYTES: usize = 12;
 pub const SIMD_PRELOAD_BYTES: usize = 64;
 pub const STORE_WIDTH_BYTES: usize = 16;
 pub const DS128_STORE_OFFSETS: [usize; 8] = [0, 12, 24, 36, 48, 60, 72, 84];
-pub const CHECKED_LANE_COUNT: usize = 4;
-pub const UNCHECKED_LANE: usize = 1;
+/// In non-strict (partial-check) mode, only lane 0 of each DS128 is checked
+/// (CHECK0 on iu0). This matches the C default mode where CHECK1 is a noop.
+pub const CHECKED_LANE: usize = 0;
 pub const PARTIAL_SINGLE_THRESHOLD: usize = SIMD_PRELOAD_BYTES + DS128_INPUT_BYTES + 4;
 pub const PARTIAL_DOUBLE_THRESHOLD: usize = SIMD_PRELOAD_BYTES + 2 * DS128_INPUT_BYTES + 4;
 pub const STRICT_SINGLE_THRESHOLD: usize = SIMD_PRELOAD_BYTES + DS128_INPUT_BYTES + 4;
@@ -21,7 +22,7 @@ pub const fn lane_in_ds128(byte_offset: usize) -> usize {
 
 #[inline(always)]
 pub const fn non_strict_checks_lane(lane: usize) -> bool {
-    lane < CHECKED_LANE_COUNT && lane != UNCHECKED_LANE
+    lane == CHECKED_LANE
 }
 
 #[inline]
@@ -109,11 +110,19 @@ pub fn simd_written_prefix_before_error_strict(input_len: usize) -> usize {
 #[inline]
 pub fn simd_touched_prefix_before_error_partial(input_len: usize) -> usize {
     let written = simd_written_prefix_before_error_partial(input_len);
-    if written == 0 { 0 } else { written + 4 }
+    if written == 0 {
+        0
+    } else {
+        written + 4
+    }
 }
 
 #[inline]
 pub fn simd_touched_prefix_before_error_strict(input_len: usize) -> usize {
     let written = simd_written_prefix_before_error_strict(input_len);
-    if written == 0 { 0 } else { written + 4 }
+    if written == 0 {
+        0
+    } else {
+        written + 4
+    }
 }

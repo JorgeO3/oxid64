@@ -5,7 +5,7 @@
 //! processed in parallel per `__m256i` register.
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{Base64Decoder, DecodeOpts, b2i, w2i};
+use super::{b2i, w2i, Base64Decoder, DecodeOpts};
 use crate::engine::common::{assert_encode_capacity, prepare_decode_output, remaining};
 use crate::engine::models::avx2 as verify_model;
 
@@ -26,6 +26,19 @@ use core::arch::x86_64::*;
 /// untrusted Base64 input.
 pub struct Avx2Decoder {
     opts: DecodeOpts,
+    available: bool,
+}
+
+#[inline]
+fn has_avx2_runtime() -> bool {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        std::arch::is_x86_feature_detected!("avx2")
+    }
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    {
+        false
+    }
 }
 
 #[inline]
@@ -51,13 +64,17 @@ impl Avx2Decoder {
     pub fn new() -> Self {
         Self {
             opts: DecodeOpts::default(),
+            available: has_avx2_runtime(),
         }
     }
 
     /// Create a new decoder with the given options.
     #[inline]
     pub fn with_opts(opts: DecodeOpts) -> Self {
-        Self { opts }
+        Self {
+            opts,
+            available: has_avx2_runtime(),
+        }
     }
 
     /// Decode Base64 `input` into `out`, returning the number of bytes written.
@@ -71,7 +88,7 @@ impl Avx2Decoder {
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
         let _out_len = prepare_decode_output(input, out)?;
 
-        if std::is_x86_feature_detected!("avx2") {
+        if self.available {
             let engine_fn = if self.opts.strict {
                 decode_engine::decode_avx2_strict
                     as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
@@ -96,7 +113,7 @@ impl Avx2Decoder {
             return None;
         }
 
-        if std::is_x86_feature_detected!("avx2") {
+        if self.available {
             // SAFETY: feature gate checked above.
             let (consumed, mut written) =
                 unsafe { decode_engine::decode_avx2_unchecked(input, out)? };
@@ -122,7 +139,7 @@ impl Avx2Decoder {
         let mut consumed = 0usize;
         let mut written = 0usize;
 
-        if std::is_x86_feature_detected!("avx2") {
+        if self.available {
             // SAFETY: feature gate checked above.
             let (c, w) = unsafe { avx2_engine::encode_base64_avx2(input, out) };
             consumed = c;
@@ -154,6 +171,26 @@ impl Base64Decoder for Avx2Decoder {
     fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
         Avx2Decoder::encode_to_slice(self, input, out)
     }
+}
+
+/// Direct AVX2 CHECK0 kernel entry for profiling.
+///
+/// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
+/// Callers must ensure AVX2 is available.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn decode_avx2_kernel_partial(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
+    unsafe { decode_engine::decode_avx2(input, out) }
+}
+
+/// Direct AVX2 unchecked kernel entry for profiling.
+///
+/// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
+/// Callers must ensure AVX2 is available.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn decode_avx2_kernel_unchecked(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
+    unsafe { decode_engine::decode_avx2_unchecked(input, out) }
 }
 
 // ---------------------------------------------------------------------------
@@ -456,12 +493,11 @@ mod decode_engine {
         );
 
         // Map + pack second pair (iv0, iv1)
-        let (ov0, shiftedv0, ov1, shiftedv1) = bitmap256v8_6x(iv0, iv1, t);
+        let (ov0, _shiftedv0, ov1, _shiftedv1) = bitmap256v8_6x(iv0, iv1, t);
         let (ov0, ov1) = bitpack256v8_6x(ov0, ov1, t.cpv);
 
-        // CHECK1: second pair is always validated
-        *vx = b64chk256(iv0, shiftedv0, t, *vx);
-        *vx = b64chk256(iv1, shiftedv1, t, *vx);
+        // CHECK1: skipped in non-strict (CHECK0-only) mode, matching
+        // Turbo-Base64 C default semantics where CHECK1 is a no-op.
 
         // Store second pair
         _mm_storeu_si128(op.add(ob + 48) as *mut __m128i, _mm256_castsi256_si128(ov0));
@@ -575,24 +611,27 @@ mod decode_engine {
         let mut op = out_base;
 
         let t = DecodeTables::new();
+        let in_addr = in_ as usize;
 
         if inlen >= verify_model::PARTIAL_SINGLE_THRESHOLD {
             let mut iu0 = _mm256_loadu_si256(ip as *const __m256i);
             let mut iu1 =
                 _mm256_loadu_si256(ip.add(verify_model::TAIL16_INPUT_BYTES * 2) as *const __m256i);
 
-            while remaining(ip, in_) > verify_model::PARTIAL_DOUBLE_THRESHOLD {
-                process_ds128_unchecked(ip, op, 0, &mut iu0, &mut iu1, &t);
-                process_ds128_unchecked(
-                    ip,
-                    op,
-                    verify_model::DS128_INPUT_BYTES,
-                    &mut iu0,
-                    &mut iu1,
-                    &t,
-                );
-                ip = ip.add(2 * verify_model::DS128_INPUT_BYTES);
-                op = op.add(2 * verify_model::DS128_OUTPUT_BYTES);
+            if let Some(lim_2x) = in_addr.checked_sub(verify_model::PARTIAL_DOUBLE_THRESHOLD) {
+                while (ip as usize) < lim_2x {
+                    process_ds128_unchecked(ip, op, 0, &mut iu0, &mut iu1, &t);
+                    process_ds128_unchecked(
+                        ip,
+                        op,
+                        verify_model::DS128_INPUT_BYTES,
+                        &mut iu0,
+                        &mut iu1,
+                        &t,
+                    );
+                    ip = ip.add(2 * verify_model::DS128_INPUT_BYTES);
+                    op = op.add(2 * verify_model::DS128_OUTPUT_BYTES);
+                }
             }
 
             if remaining(ip, in_) > verify_model::PARTIAL_SINGLE_THRESHOLD {
@@ -608,12 +647,14 @@ mod decode_engine {
         let delta_values_lo = _mm256_castsi256_si128(t.delta_values);
         let cpv_lo = _mm256_castsi256_si128(t.cpv);
 
-        while remaining(ip, in_) > verify_model::TAIL_THRESHOLD {
-            let iv = _mm_loadu_si128(ip as *const __m128i);
-            let (ov, _vsh) = map_and_pack_128(iv, delta_asso_lo, delta_values_lo, cpv_lo);
-            _mm_storeu_si128(op as *mut __m128i, ov);
-            ip = ip.add(verify_model::TAIL16_INPUT_BYTES);
-            op = op.add(verify_model::TAIL16_OUTPUT_BYTES);
+        if let Some(lim_tail) = in_addr.checked_sub(verify_model::TAIL_THRESHOLD) {
+            while (ip as usize) < lim_tail {
+                let iv = _mm_loadu_si128(ip as *const __m128i);
+                let (ov, _vsh) = map_and_pack_128(iv, delta_asso_lo, delta_values_lo, cpv_lo);
+                _mm_storeu_si128(op as *mut __m128i, ov);
+                ip = ip.add(verify_model::TAIL16_INPUT_BYTES);
+                op = op.add(verify_model::TAIL16_OUTPUT_BYTES);
+            }
         }
 
         Some(crate::engine::offsets(ip, op, in_base, out_base))
@@ -643,7 +684,95 @@ mod decode_engine {
         let mut vx = _mm256_setzero_si256();
 
         let t = DecodeTables::new();
+        let delta_asso = t.delta_asso;
+        let delta_values = t.delta_values;
+        let check_asso = t.check_asso;
+        let check_values = t.check_values;
+        let cpv = t.cpv;
+        let mul1 = _mm256_set1_epi32(0x01400140);
+        let mul2 = _mm256_set1_epi32(0x00011000);
         let mut _vx: __m128i;
+        let in_addr = in_ as usize;
+
+        macro_rules! process_partial_block {
+            ($ip:ident, $op:ident, $iu0:ident, $iu1:ident, $vx:ident, $base:expr) => {{
+                let iv0 = _mm256_loadu_si256($ip.add(64 + $base) as *const __m256i);
+                let iv1 = _mm256_loadu_si256($ip.add(64 + $base + 32) as *const __m256i);
+
+                let mut delta_hash0 = _mm256_shuffle_epi8(delta_asso, $iu0);
+                let mut delta_hash1 = _mm256_shuffle_epi8(delta_asso, $iu1);
+                let shifted0 = _mm256_srli_epi32($iu0, 3);
+                delta_hash0 = _mm256_avg_epu8(delta_hash0, shifted0);
+                let shifted1 = _mm256_srli_epi32($iu1, 3);
+                delta_hash1 = _mm256_avg_epu8(delta_hash1, shifted1);
+
+                let mut ou0 = _mm256_add_epi8(_mm256_shuffle_epi8(delta_values, delta_hash0), $iu0);
+                let mut ou1 = _mm256_add_epi8(_mm256_shuffle_epi8(delta_values, delta_hash1), $iu1);
+                let merge0 = _mm256_maddubs_epi16(ou0, mul1);
+                let merge1 = _mm256_maddubs_epi16(ou1, mul1);
+                ou0 = _mm256_madd_epi16(merge0, mul2);
+                ou1 = _mm256_madd_epi16(merge1, mul2);
+                ou0 = _mm256_shuffle_epi8(ou0, cpv);
+                ou1 = _mm256_shuffle_epi8(ou1, cpv);
+
+                let check_hash0 = _mm256_avg_epu8(_mm256_shuffle_epi8(check_asso, $iu0), shifted0);
+                let chk0 = _mm256_adds_epi8(_mm256_shuffle_epi8(check_values, check_hash0), $iu0);
+                $vx = _mm256_or_si256($vx, chk0);
+
+                $iu0 = _mm256_loadu_si256($ip.add(64 + $base + 64) as *const __m256i);
+                $iu1 = _mm256_loadu_si256($ip.add(64 + $base + 96) as *const __m256i);
+
+                let ob = $base / 4 * 3;
+                _mm_storeu_si128($op.add(ob) as *mut __m128i, _mm256_castsi256_si128(ou0));
+                _mm_storeu_si128(
+                    $op.add(ob + 12) as *mut __m128i,
+                    _mm256_extracti128_si256(ou0, 1),
+                );
+                _mm_storeu_si128(
+                    $op.add(ob + 24) as *mut __m128i,
+                    _mm256_castsi256_si128(ou1),
+                );
+                _mm_storeu_si128(
+                    $op.add(ob + 36) as *mut __m128i,
+                    _mm256_extracti128_si256(ou1, 1),
+                );
+
+                let mut delta_hashv0 = _mm256_shuffle_epi8(delta_asso, iv0);
+                let mut delta_hashv1 = _mm256_shuffle_epi8(delta_asso, iv1);
+                let shiftedv0 = _mm256_srli_epi32(iv0, 3);
+                delta_hashv0 = _mm256_avg_epu8(delta_hashv0, shiftedv0);
+                let shiftedv1 = _mm256_srli_epi32(iv1, 3);
+                delta_hashv1 = _mm256_avg_epu8(delta_hashv1, shiftedv1);
+
+                let mut ov0 = _mm256_add_epi8(_mm256_shuffle_epi8(delta_values, delta_hashv0), iv0);
+                let mut ov1 = _mm256_add_epi8(_mm256_shuffle_epi8(delta_values, delta_hashv1), iv1);
+                let mergev0 = _mm256_maddubs_epi16(ov0, mul1);
+                let mergev1 = _mm256_maddubs_epi16(ov1, mul1);
+                ov0 = _mm256_madd_epi16(mergev0, mul2);
+                ov1 = _mm256_madd_epi16(mergev1, mul2);
+                ov0 = _mm256_shuffle_epi8(ov0, cpv);
+                ov1 = _mm256_shuffle_epi8(ov1, cpv);
+
+                // CHECK1: skipped in non-strict (CHECK0-only) mode.
+
+                _mm_storeu_si128(
+                    $op.add(ob + 48) as *mut __m128i,
+                    _mm256_castsi256_si128(ov0),
+                );
+                _mm_storeu_si128(
+                    $op.add(ob + 60) as *mut __m128i,
+                    _mm256_extracti128_si256(ov0, 1),
+                );
+                _mm_storeu_si128(
+                    $op.add(ob + 72) as *mut __m128i,
+                    _mm256_castsi256_si128(ov1),
+                );
+                _mm_storeu_si128(
+                    $op.add(ob + 84) as *mut __m128i,
+                    _mm256_extracti128_si256(ov1, 1),
+                );
+            }};
+        }
 
         if inlen >= verify_model::PARTIAL_SINGLE_THRESHOLD {
             let mut iu0 = _mm256_loadu_si256(ip as *const __m256i);
@@ -651,19 +780,13 @@ mod decode_engine {
                 _mm256_loadu_si256(ip.add(verify_model::TAIL16_INPUT_BYTES * 2) as *const __m256i);
 
             // Double-DS128 unrolled loop: 256 input -> 192 output
-            while remaining(ip, in_) > verify_model::PARTIAL_DOUBLE_THRESHOLD {
-                process_ds128_partial(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
-                process_ds128_partial(
-                    ip,
-                    op,
-                    verify_model::DS128_INPUT_BYTES,
-                    &mut iu0,
-                    &mut iu1,
-                    &t,
-                    &mut vx,
-                );
-                ip = ip.add(2 * verify_model::DS128_INPUT_BYTES);
-                op = op.add(2 * verify_model::DS128_OUTPUT_BYTES);
+            if let Some(lim_2x) = in_addr.checked_sub(verify_model::PARTIAL_DOUBLE_THRESHOLD) {
+                while (ip as usize) < lim_2x {
+                    process_partial_block!(ip, op, iu0, iu1, vx, 0);
+                    process_partial_block!(ip, op, iu0, iu1, vx, verify_model::DS128_INPUT_BYTES);
+                    ip = ip.add(2 * verify_model::DS128_INPUT_BYTES);
+                    op = op.add(2 * verify_model::DS128_OUTPUT_BYTES);
+                }
             }
 
             // Single-DS128 drain: 128 input -> 96 output
@@ -691,14 +814,16 @@ mod decode_engine {
         let check_asso_lo = _mm256_castsi256_si128(t.check_asso);
         let check_values_lo = _mm256_castsi256_si128(t.check_values);
 
-        while remaining(ip, in_) > verify_model::TAIL_THRESHOLD {
-            let iv = _mm_loadu_si128(ip as *const __m128i);
-            let (ov, vsh) = map_and_pack_128(iv, delta_asso_lo, delta_values_lo, cpv_lo);
-            _mm_storeu_si128(op as *mut __m128i, ov);
-            // CHECK0: validate in tail
-            _vx = b64chk128(iv, vsh, check_asso_lo, check_values_lo, _vx);
-            ip = ip.add(verify_model::TAIL16_INPUT_BYTES);
-            op = op.add(verify_model::TAIL16_OUTPUT_BYTES);
+        if let Some(lim_tail) = in_addr.checked_sub(verify_model::TAIL_THRESHOLD) {
+            while (ip as usize) < lim_tail {
+                let iv = _mm_loadu_si128(ip as *const __m128i);
+                let (ov, vsh) = map_and_pack_128(iv, delta_asso_lo, delta_values_lo, cpv_lo);
+                _mm_storeu_si128(op as *mut __m128i, ov);
+                // CHECK0: validate in tail
+                _vx = b64chk128(iv, vsh, check_asso_lo, check_values_lo, _vx);
+                ip = ip.add(verify_model::TAIL16_INPUT_BYTES);
+                op = op.add(verify_model::TAIL16_OUTPUT_BYTES);
+            }
         }
 
         // Return (consumed, written) — let dispatch_decode handle the scalar tail.
@@ -738,6 +863,7 @@ mod decode_engine {
 
         let t = DecodeTables::new();
         let mut _vx: __m128i;
+        let in_addr = in_ as usize;
 
         if inlen >= verify_model::STRICT_SINGLE_THRESHOLD {
             let mut iu0 = _mm256_loadu_si256(ip as *const __m256i);
@@ -745,44 +871,48 @@ mod decode_engine {
                 _mm256_loadu_si256(ip.add(verify_model::TAIL16_INPUT_BYTES * 2) as *const __m256i);
 
             // 3x-DS128 unrolled loop: 384 input -> 288 output
-            while remaining(ip, in_) > verify_model::STRICT_TRIPLE_THRESHOLD {
-                process_ds128_strict(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
-                process_ds128_strict(
-                    ip,
-                    op,
-                    verify_model::DS128_INPUT_BYTES,
-                    &mut iu0,
-                    &mut iu1,
-                    &t,
-                    &mut vx,
-                );
-                process_ds128_strict(
-                    ip,
-                    op,
-                    2 * verify_model::DS128_INPUT_BYTES,
-                    &mut iu0,
-                    &mut iu1,
-                    &t,
-                    &mut vx,
-                );
-                ip = ip.add(3 * verify_model::DS128_INPUT_BYTES);
-                op = op.add(3 * verify_model::DS128_OUTPUT_BYTES);
+            if let Some(lim_3x) = in_addr.checked_sub(verify_model::STRICT_TRIPLE_THRESHOLD) {
+                while (ip as usize) < lim_3x {
+                    process_ds128_strict(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
+                    process_ds128_strict(
+                        ip,
+                        op,
+                        verify_model::DS128_INPUT_BYTES,
+                        &mut iu0,
+                        &mut iu1,
+                        &t,
+                        &mut vx,
+                    );
+                    process_ds128_strict(
+                        ip,
+                        op,
+                        2 * verify_model::DS128_INPUT_BYTES,
+                        &mut iu0,
+                        &mut iu1,
+                        &t,
+                        &mut vx,
+                    );
+                    ip = ip.add(3 * verify_model::DS128_INPUT_BYTES);
+                    op = op.add(3 * verify_model::DS128_OUTPUT_BYTES);
+                }
             }
 
             // 2x-DS128 drain: 256 input -> 192 output
-            while remaining(ip, in_) > verify_model::STRICT_DOUBLE_THRESHOLD {
-                process_ds128_strict(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
-                process_ds128_strict(
-                    ip,
-                    op,
-                    verify_model::DS128_INPUT_BYTES,
-                    &mut iu0,
-                    &mut iu1,
-                    &t,
-                    &mut vx,
-                );
-                ip = ip.add(2 * verify_model::DS128_INPUT_BYTES);
-                op = op.add(2 * verify_model::DS128_OUTPUT_BYTES);
+            if let Some(lim_2x) = in_addr.checked_sub(verify_model::STRICT_DOUBLE_THRESHOLD) {
+                while (ip as usize) < lim_2x {
+                    process_ds128_strict(ip, op, 0, &mut iu0, &mut iu1, &t, &mut vx);
+                    process_ds128_strict(
+                        ip,
+                        op,
+                        verify_model::DS128_INPUT_BYTES,
+                        &mut iu0,
+                        &mut iu1,
+                        &t,
+                        &mut vx,
+                    );
+                    ip = ip.add(2 * verify_model::DS128_INPUT_BYTES);
+                    op = op.add(2 * verify_model::DS128_OUTPUT_BYTES);
+                }
             }
 
             // Single-DS128 drain
@@ -808,13 +938,15 @@ mod decode_engine {
         let check_asso_lo = _mm256_castsi256_si128(t.check_asso);
         let check_values_lo = _mm256_castsi256_si128(t.check_values);
 
-        while remaining(ip, in_) > verify_model::TAIL_THRESHOLD {
-            let iv = _mm_loadu_si128(ip as *const __m128i);
-            let (ov, vsh) = map_and_pack_128(iv, delta_asso_lo, delta_values_lo, cpv_lo);
-            _mm_storeu_si128(op as *mut __m128i, ov);
-            _vx = b64chk128(iv, vsh, check_asso_lo, check_values_lo, _vx);
-            ip = ip.add(verify_model::TAIL16_INPUT_BYTES);
-            op = op.add(verify_model::TAIL16_OUTPUT_BYTES);
+        if let Some(lim_tail) = in_addr.checked_sub(verify_model::TAIL_THRESHOLD) {
+            while (ip as usize) < lim_tail {
+                let iv = _mm_loadu_si128(ip as *const __m128i);
+                let (ov, vsh) = map_and_pack_128(iv, delta_asso_lo, delta_values_lo, cpv_lo);
+                _mm_storeu_si128(op as *mut __m128i, ov);
+                _vx = b64chk128(iv, vsh, check_asso_lo, check_values_lo, _vx);
+                ip = ip.add(verify_model::TAIL16_INPUT_BYTES);
+                op = op.add(verify_model::TAIL16_OUTPUT_BYTES);
+            }
         }
 
         if _mm_movemask_epi8(_vx) != 0 {

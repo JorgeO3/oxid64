@@ -1,4 +1,3 @@
-use oxid64::engine::DecodeOpts;
 use oxid64::engine::avx2::Avx2Decoder;
 use oxid64::engine::models::avx2::{
     non_strict_checks_offset, simd_touched_prefix_before_error_partial,
@@ -6,6 +5,7 @@ use oxid64::engine::models::avx2::{
     simd_written_prefix_before_error_strict,
 };
 use oxid64::engine::scalar::encode_base64_fast;
+use oxid64::engine::DecodeOpts;
 
 #[repr(align(32))]
 struct Aligned<const N: usize>([u8; N]);
@@ -28,15 +28,15 @@ fn invalidate_one(encoded: &[u8], pos: usize, byte: u8) -> Vec<u8> {
 fn avx2_model_schedule_and_prefix_bounds() {
     assert!(non_strict_checks_offset(200, 0));
     assert!(!non_strict_checks_offset(200, 40));
-    assert!(non_strict_checks_offset(200, 80));
+    assert!(!non_strict_checks_offset(200, 80));
     assert!(non_strict_checks_offset(200, 160));
 
     assert!(non_strict_checks_offset(328, 0));
     assert!(!non_strict_checks_offset(328, 40));
-    assert!(non_strict_checks_offset(328, 80));
+    assert!(!non_strict_checks_offset(328, 80));
     assert!(non_strict_checks_offset(328, 128));
     assert!(!non_strict_checks_offset(328, 168));
-    assert!(non_strict_checks_offset(328, 232));
+    assert!(!non_strict_checks_offset(328, 232));
     assert!(non_strict_checks_offset(328, 320));
 
     assert_eq!(simd_written_prefix_before_error_partial(200), 144);

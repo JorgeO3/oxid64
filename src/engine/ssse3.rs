@@ -43,10 +43,10 @@
 //! The encoder is independent of [`DecodeOpts`].
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{Base64Decoder, DecodeOpts, b2i, w2i};
+use super::{b2i, w2i, Base64Decoder, DecodeOpts};
 use crate::engine::common::{
-    assert_encode_capacity, can_advance, can_process_ds64, can_process_ds64_double,
-    can_process_tail16, can_read, prepare_decode_output, remaining, safe_in_end_4,
+    assert_encode_capacity, can_advance, can_process_ds64, can_process_tail16, can_read,
+    prepare_decode_output, safe_in_end_4,
 };
 use crate::engine::models::ssse3 as verify_model;
 
@@ -66,6 +66,19 @@ use core::arch::x86_64::*;
 /// associated function that does not depend on decoder options.
 pub struct Ssse3Decoder {
     opts: DecodeOpts,
+    available: bool,
+}
+
+#[inline]
+fn has_ssse3_runtime() -> bool {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        std::arch::is_x86_feature_detected!("ssse3")
+    }
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    {
+        false
+    }
 }
 
 impl Ssse3Decoder {
@@ -74,13 +87,17 @@ impl Ssse3Decoder {
     pub fn new() -> Self {
         Self {
             opts: DecodeOpts::default(),
+            available: has_ssse3_runtime(),
         }
     }
 
     /// Create a new decoder with the given options.
     #[inline]
     pub fn with_opts(opts: DecodeOpts) -> Self {
-        Self { opts }
+        Self {
+            opts,
+            available: has_ssse3_runtime(),
+        }
     }
 
     /// Decode Base64 `input` into `out`, returning the number of bytes written.
@@ -93,7 +110,7 @@ impl Ssse3Decoder {
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
         let _out_len = prepare_decode_output(input, out)?;
 
-        if std::is_x86_feature_detected!("ssse3") {
+        if self.available {
             let engine_fn = if self.opts.strict {
                 decode_engine::decode_ssse3_strict
                     as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
@@ -117,7 +134,7 @@ impl Ssse3Decoder {
         let mut consumed = 0usize;
         let mut written = 0usize;
 
-        if std::is_x86_feature_detected!("ssse3") {
+        if self.available {
             // SAFETY: feature gate checked above.
             let (c, w) = unsafe { encode_engine::encode_base64_ssse3(input, out) };
             consumed = c;
@@ -149,6 +166,26 @@ impl Base64Decoder for Ssse3Decoder {
     fn encode_to_slice(&self, input: &[u8], out: &mut [u8]) -> usize {
         Ssse3Decoder::encode_to_slice(self, input, out)
     }
+}
+
+/// Direct SSSE3 CHECK0 kernel entry for profiling.
+///
+/// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
+/// Callers must ensure SSSE3 is available.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn decode_ssse3_kernel_partial(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
+    unsafe { decode_engine::decode_ssse3(input, out) }
+}
+
+/// Direct SSSE3 encode kernel entry for profiling.
+///
+/// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
+/// Callers must ensure SSSE3 is available.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn encode_ssse3_kernel(input: &[u8], out: &mut [u8]) -> (usize, usize) {
+    unsafe { encode_engine::encode_base64_ssse3(input, out) }
 }
 
 // ---------------------------------------------------------------------------
@@ -532,33 +569,58 @@ mod decode_engine {
         let t = DecodeTables::new();
         let mut error_mask = _mm_setzero_si128();
 
+        // Pre-compute loop limit addresses.  The DS64 loops advance in_ptr
+        // and out_ptr by fixed amounts; comparing against a pre-computed
+        // limit avoids per-iteration saturating subtracts and cmov clamps
+        // that the generic `can_process_*` helpers generate.
+        let safe_addr = safe_end as usize;
+        let out_end_addr = out_end as usize;
+
         if can_process_ds64(in_ptr, safe_end, out_ptr, out_end) {
             let mut iu0 = _mm_loadu_si128(in_ptr as *const __m128i);
             let mut iu1 =
                 _mm_loadu_si128(in_ptr.add(verify_model::TAIL16_INPUT_BYTES) as *const __m128i);
 
-            while can_process_ds64_double(in_ptr, safe_end, out_ptr, out_end) {
-                process_ds64_partial(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_mask);
-                process_ds64_partial(
-                    in_ptr.add(verify_model::DS64_INPUT_BYTES),
-                    out_ptr.add(verify_model::DS64_OUTPUT_BYTES),
-                    &mut iu0,
-                    &mut iu1,
-                    &t,
-                    &mut error_mask,
-                );
-                in_ptr = in_ptr.add(2 * verify_model::DS64_INPUT_BYTES);
-                out_ptr = out_ptr.add(2 * verify_model::DS64_OUTPUT_BYTES);
+            // Double DS64: 160 input bytes, 100 output bytes per iteration.
+            // Guard subtraction with checked_sub to avoid wrapping on tiny
+            // buffers (practically impossible on 64-bit, but correct).
+            if let (Some(in_lim_2x), Some(out_lim_2x)) = (
+                safe_addr.checked_sub(
+                    verify_model::SIMD_PRELOAD_BYTES + 2 * verify_model::DS64_INPUT_BYTES,
+                ),
+                out_end_addr.checked_sub(2 * verify_model::DS64_OUTPUT_BYTES + 4),
+            ) {
+                while (in_ptr as usize) <= in_lim_2x && (out_ptr as usize) <= out_lim_2x {
+                    process_ds64_partial(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_mask);
+                    process_ds64_partial(
+                        in_ptr.add(verify_model::DS64_INPUT_BYTES),
+                        out_ptr.add(verify_model::DS64_OUTPUT_BYTES),
+                        &mut iu0,
+                        &mut iu1,
+                        &t,
+                        &mut error_mask,
+                    );
+                    in_ptr = in_ptr.add(2 * verify_model::DS64_INPUT_BYTES);
+                    out_ptr = out_ptr.add(2 * verify_model::DS64_OUTPUT_BYTES);
+                }
             }
 
-            while can_process_ds64(in_ptr, safe_end, out_ptr, out_end) {
-                process_ds64_partial(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_mask);
-                in_ptr = in_ptr.add(verify_model::DS64_INPUT_BYTES);
-                out_ptr = out_ptr.add(verify_model::DS64_OUTPUT_BYTES);
+            // Single DS64 drain: 96 input bytes, 52 output bytes.
+            if let (Some(in_lim_1x), Some(out_lim_1x)) = (
+                safe_addr
+                    .checked_sub(verify_model::SIMD_PRELOAD_BYTES + verify_model::DS64_INPUT_BYTES),
+                out_end_addr.checked_sub(verify_model::DS64_OUTPUT_BYTES + 4),
+            ) {
+                while (in_ptr as usize) <= in_lim_1x && (out_ptr as usize) <= out_lim_1x {
+                    process_ds64_partial(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_mask);
+                    in_ptr = in_ptr.add(verify_model::DS64_INPUT_BYTES);
+                    out_ptr = out_ptr.add(verify_model::DS64_OUTPUT_BYTES);
+                }
             }
         }
 
-        // Single-vector tail loop
+        // Single-vector tail loop (executes at most a few times — keep
+        // the readable helper-based guard here).
         while can_process_tail16(in_ptr, safe_end, out_ptr, out_end) {
             let iv = _mm_loadu_si128(in_ptr as *const __m128i);
             let (ov, shifted) = map_and_pack(iv, &t);
@@ -611,29 +673,48 @@ mod decode_engine {
         let t = DecodeTables::new();
         let mut error_bits = 0i32;
 
+        // Pre-compute loop limit addresses (same optimisation as decode_ssse3).
+        let safe_addr = safe_end as usize;
+        let out_end_addr = out_end as usize;
+
         if can_process_ds64(in_ptr, safe_end, out_ptr, out_end) {
             let mut iu0 = _mm_loadu_si128(in_ptr as *const __m128i);
             let mut iu1 =
                 _mm_loadu_si128(in_ptr.add(verify_model::TAIL16_INPUT_BYTES) as *const __m128i);
 
-            while can_process_ds64_double(in_ptr, safe_end, out_ptr, out_end) {
-                process_ds64_strict(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_bits);
-                process_ds64_strict(
-                    in_ptr.add(verify_model::DS64_INPUT_BYTES),
-                    out_ptr.add(verify_model::DS64_OUTPUT_BYTES),
-                    &mut iu0,
-                    &mut iu1,
-                    &t,
-                    &mut error_bits,
-                );
-                in_ptr = in_ptr.add(2 * verify_model::DS64_INPUT_BYTES);
-                out_ptr = out_ptr.add(2 * verify_model::DS64_OUTPUT_BYTES);
+            // Double DS64: 160 input bytes, 100 output bytes per iteration.
+            if let (Some(in_lim_2x), Some(out_lim_2x)) = (
+                safe_addr.checked_sub(
+                    verify_model::SIMD_PRELOAD_BYTES + 2 * verify_model::DS64_INPUT_BYTES,
+                ),
+                out_end_addr.checked_sub(2 * verify_model::DS64_OUTPUT_BYTES + 4),
+            ) {
+                while (in_ptr as usize) <= in_lim_2x && (out_ptr as usize) <= out_lim_2x {
+                    process_ds64_strict(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_bits);
+                    process_ds64_strict(
+                        in_ptr.add(verify_model::DS64_INPUT_BYTES),
+                        out_ptr.add(verify_model::DS64_OUTPUT_BYTES),
+                        &mut iu0,
+                        &mut iu1,
+                        &t,
+                        &mut error_bits,
+                    );
+                    in_ptr = in_ptr.add(2 * verify_model::DS64_INPUT_BYTES);
+                    out_ptr = out_ptr.add(2 * verify_model::DS64_OUTPUT_BYTES);
+                }
             }
 
-            while can_process_ds64(in_ptr, safe_end, out_ptr, out_end) {
-                process_ds64_strict(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_bits);
-                in_ptr = in_ptr.add(verify_model::DS64_INPUT_BYTES);
-                out_ptr = out_ptr.add(verify_model::DS64_OUTPUT_BYTES);
+            // Single DS64 drain: 96 input bytes, 52 output bytes.
+            if let (Some(in_lim_1x), Some(out_lim_1x)) = (
+                safe_addr
+                    .checked_sub(verify_model::SIMD_PRELOAD_BYTES + verify_model::DS64_INPUT_BYTES),
+                out_end_addr.checked_sub(verify_model::DS64_OUTPUT_BYTES + 4),
+            ) {
+                while (in_ptr as usize) <= in_lim_1x && (out_ptr as usize) <= out_lim_1x {
+                    process_ds64_strict(in_ptr, out_ptr, &mut iu0, &mut iu1, &t, &mut error_bits);
+                    in_ptr = in_ptr.add(verify_model::DS64_INPUT_BYTES);
+                    out_ptr = out_ptr.add(verify_model::DS64_OUTPUT_BYTES);
+                }
             }
         }
 
@@ -662,6 +743,42 @@ mod decode_engine {
 mod encode_engine {
     use super::*;
 
+    /// Inline-asm `pmulhuw` — forces the single-instruction encoding.
+    ///
+    /// LLVM sometimes expands `_mm_mulhi_epu16` into a 14-instruction
+    /// sequence (punpck → pshufd → psrld → … → packssdw). This wrapper
+    /// guarantees the hardware instruction is emitted, matching what the
+    /// AVX2 path does with `fast_vpmulhuw`.
+    #[inline]
+    #[target_feature(enable = "ssse3")]
+    unsafe fn fast_pmulhuw(a: __m128i, b: __m128i) -> __m128i {
+        let mut res: __m128i = a;
+        std::arch::asm!(
+            "pmulhuw {res}, {b}",
+            res = inlateout(xmm_reg) res,
+            b = in(xmm_reg) b,
+            options(pure, nomem, nostack)
+        );
+        res
+    }
+
+    /// Inline-asm `pmullw` — forces the single-instruction encoding.
+    ///
+    /// Provided for symmetry with [`fast_pmulhuw`] and to prevent future
+    /// LLVM regressions.
+    #[inline]
+    #[target_feature(enable = "ssse3")]
+    unsafe fn fast_pmullw(a: __m128i, b: __m128i) -> __m128i {
+        let mut res: __m128i = a;
+        std::arch::asm!(
+            "pmullw {res}, {b}",
+            res = inlateout(xmm_reg) res,
+            b = in(xmm_reg) b,
+            options(pure, nomem, nostack)
+        );
+        res
+    }
+
     /// Vectorised unsigned 16-bit multiply for two register pairs.
     ///
     /// Computes `(hi_part | lo_part)` for each pair, where `hi_part` and
@@ -682,10 +799,10 @@ mod encode_engine {
         let t1_0 = _mm_and_si128(a0, mask2);
         let t1_1 = _mm_and_si128(a1, mask2);
 
-        let hi0 = _mm_mulhi_epu16(t0_0, mulhi);
-        let hi1 = _mm_mulhi_epu16(t0_1, mulhi);
-        let lo0 = _mm_mullo_epi16(t1_0, mullo);
-        let lo1 = _mm_mullo_epi16(t1_1, mullo);
+        let hi0 = fast_pmulhuw(t0_0, mulhi);
+        let hi1 = fast_pmulhuw(t0_1, mulhi);
+        let lo0 = fast_pmullw(t1_0, mullo);
+        let lo1 = fast_pmullw(t1_1, mullo);
 
         (_mm_or_si128(hi0, lo0), _mm_or_si128(hi1, lo1))
     }
@@ -745,25 +862,6 @@ mod encode_engine {
         let mut out_ptr = out_data.as_mut_ptr();
         let in_end = in_ptr.add(in_data.len());
 
-        if (out_ptr as usize) & 3 != 0 {
-            return (0, 0);
-        }
-
-        while (out_ptr as usize) & 15 != 0 {
-            if remaining(in_ptr, in_end) < 3 {
-                return (
-                    in_ptr as usize - in_data.as_ptr() as usize,
-                    out_ptr as usize - out_data.as_ptr() as usize,
-                );
-            }
-            let a = *in_ptr;
-            let b = *in_ptr.add(1);
-            let c = *in_ptr.add(2);
-            crate::engine::scalar::encode_block_3_to_4_ptr(a, b, c, out_ptr);
-            in_ptr = in_ptr.add(3);
-            out_ptr = out_ptr.add(4);
-        }
-
         if (in_end as usize).saturating_sub(in_ptr as usize) < 52 {
             return (
                 in_ptr as usize - in_data.as_ptr() as usize,
@@ -793,8 +891,8 @@ mod encode_engine {
             let v0 = _mm_loadu_si128(in_ptr.add(24) as *const __m128i);
             let v1 = _mm_loadu_si128(in_ptr.add(36) as *const __m128i);
 
-            _mm_store_si128(out_ptr as *mut __m128i, o0);
-            _mm_store_si128(out_ptr.add(16) as *mut __m128i, o1);
+            _mm_storeu_si128(out_ptr as *mut __m128i, o0);
+            _mm_storeu_si128(out_ptr.add(16) as *mut __m128i, o1);
 
             let (o2, o3) = process_block_x2(
                 v0, v1, shuf, mulhi, mullo, mask1, mask2, offsets, subs_val, cmpgt_val,
@@ -803,8 +901,8 @@ mod encode_engine {
             let u2 = _mm_loadu_si128(in_ptr.add(48) as *const __m128i);
             let u3 = _mm_loadu_si128(in_ptr.add(60) as *const __m128i);
 
-            _mm_store_si128(out_ptr.add(32) as *mut __m128i, o2);
-            _mm_store_si128(out_ptr.add(48) as *mut __m128i, o3);
+            _mm_storeu_si128(out_ptr.add(32) as *mut __m128i, o2);
+            _mm_storeu_si128(out_ptr.add(48) as *mut __m128i, o3);
 
             let (o4, o5) = process_block_x2(
                 u2, u3, shuf, mulhi, mullo, mask1, mask2, offsets, subs_val, cmpgt_val,
@@ -813,15 +911,15 @@ mod encode_engine {
             let v2 = _mm_loadu_si128(in_ptr.add(72) as *const __m128i);
             let v3 = _mm_loadu_si128(in_ptr.add(84) as *const __m128i);
 
-            _mm_store_si128(out_ptr.add(64) as *mut __m128i, o4);
-            _mm_store_si128(out_ptr.add(80) as *mut __m128i, o5);
+            _mm_storeu_si128(out_ptr.add(64) as *mut __m128i, o4);
+            _mm_storeu_si128(out_ptr.add(80) as *mut __m128i, o5);
 
             let (o6, o7) = process_block_x2(
                 v2, v3, shuf, mulhi, mullo, mask1, mask2, offsets, subs_val, cmpgt_val,
             );
 
-            _mm_store_si128(out_ptr.add(96) as *mut __m128i, o6);
-            _mm_store_si128(out_ptr.add(112) as *mut __m128i, o7);
+            _mm_storeu_si128(out_ptr.add(96) as *mut __m128i, o6);
+            _mm_storeu_si128(out_ptr.add(112) as *mut __m128i, o7);
 
             in_ptr = in_ptr.add(96);
             out_ptr = out_ptr.add(128);
@@ -838,15 +936,15 @@ mod encode_engine {
             let v0 = _mm_loadu_si128(in_ptr.add(24) as *const __m128i);
             let v1 = _mm_loadu_si128(in_ptr.add(36) as *const __m128i);
 
-            _mm_store_si128(out_ptr as *mut __m128i, o0);
-            _mm_store_si128(out_ptr.add(16) as *mut __m128i, o1);
+            _mm_storeu_si128(out_ptr as *mut __m128i, o0);
+            _mm_storeu_si128(out_ptr.add(16) as *mut __m128i, o1);
 
             let (o2, o3) = process_block_x2(
                 v0, v1, shuf, mulhi, mullo, mask1, mask2, offsets, subs_val, cmpgt_val,
             );
 
-            _mm_store_si128(out_ptr.add(32) as *mut __m128i, o2);
-            _mm_store_si128(out_ptr.add(48) as *mut __m128i, o3);
+            _mm_storeu_si128(out_ptr.add(32) as *mut __m128i, o2);
+            _mm_storeu_si128(out_ptr.add(48) as *mut __m128i, o3);
 
             in_ptr = in_ptr.add(48);
             out_ptr = out_ptr.add(64);
