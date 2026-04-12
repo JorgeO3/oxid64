@@ -1,6 +1,6 @@
+use oxid64::engine::DecodeOpts;
 use oxid64::engine::scalar::{decode_base64_fast, encode_base64_fast};
 use oxid64::engine::ssse3::Ssse3Decoder;
-use oxid64::engine::DecodeOpts;
 use proptest::prelude::*;
 
 fn decode_scalar_reference(input: &[u8]) -> Option<Vec<u8>> {
@@ -9,11 +9,7 @@ fn decode_scalar_reference(input: &[u8]) -> Option<Vec<u8>> {
         return Some(vec![]);
     }
     let pad = if input[n - 1] == b'=' {
-        if input[n - 2] == b'=' {
-            2
-        } else {
-            1
-        }
+        if input[n - 2] == b'=' { 2 } else { 1 }
     } else {
         0
     };
@@ -32,11 +28,7 @@ fn decode_ssse3_strict(input: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let pad = if input[n - 1] == b'=' {
-        if input[n - 2] == b'=' {
-            2
-        } else {
-            1
-        }
+        if input[n - 2] == b'=' { 2 } else { 1 }
     } else {
         0
     };
@@ -86,11 +78,7 @@ fn decode_ssse3_non_strict(input: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let pad = if input[n - 1] == b'=' {
-        if input[n - 2] == b'=' {
-            2
-        } else {
-            1
-        }
+        if input[n - 2] == b'=' { 2 } else { 1 }
     } else {
         0
     };
@@ -502,9 +490,11 @@ fn test_sse_decode_misaligned_output_and_input_subslice() {
                 "decode mismatch at raw len={len}"
             );
             assert!(out_backing[..out_offset].iter().all(|&b| b == canary));
-            assert!(out_backing[out_offset + out_len..]
-                .iter()
-                .all(|&b| b == canary));
+            assert!(
+                out_backing[out_offset + out_len..]
+                    .iter()
+                    .all(|&b| b == canary)
+            );
         }
     }
 }

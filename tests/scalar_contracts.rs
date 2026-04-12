@@ -1,7 +1,7 @@
-use oxid64::engine::scalar::{
-    decode_base64_fast, decode_tail_3, decoded_len_strict, encode_base64_fast, ScalarDecoder,
-};
 use oxid64::Base64Decoder;
+use oxid64::engine::scalar::{
+    ScalarDecoder, decode_base64_fast, decode_tail_3, decoded_len_strict, encode_base64_fast,
+};
 
 fn fill_xorshift(buf: &mut [u8]) {
     let mut x = 0x1234_5678_9abc_def0_u64;
@@ -210,9 +210,11 @@ fn scalar_decoder_handles_exact_windows_and_subslices() {
             assert_eq!(written, input.len());
             assert_eq!(out, input.as_slice());
             assert!(out_backing[..offset].iter().all(|&b| b == canary));
-            assert!(out_backing[offset + input.len()..]
-                .iter()
-                .all(|&b| b == canary));
+            assert!(
+                out_backing[offset + input.len()..]
+                    .iter()
+                    .all(|&b| b == canary)
+            );
         }
     }
 }

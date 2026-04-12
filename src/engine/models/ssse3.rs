@@ -84,9 +84,5 @@ pub fn aligned_written_prefix_before_error(input_len: usize) -> usize {
 #[inline]
 pub fn aligned_touched_prefix_before_error(input_len: usize) -> usize {
     let written = aligned_written_prefix_before_error(input_len);
-    if written == 0 {
-        0
-    } else {
-        written + 4
-    }
+    if written == 0 { 0 } else { written + 4 }
 }

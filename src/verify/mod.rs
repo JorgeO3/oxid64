@@ -1,5 +1,6 @@
 #![cfg(kani)]
 
+use crate::Base64Decoder;
 use crate::engine::common::{
     can_advance, can_process_ds64, can_process_ds64_double, can_process_tail16, can_read,
     can_write, decode_offsets, prepare_decode_output, remaining, remaining_mut, safe_in_end_4,
@@ -8,20 +9,16 @@ use crate::engine::common::{
 use crate::engine::dispatch_decode;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use crate::engine::models::avx2::{
-    non_strict_checks_offset as avx2_non_strict_checks_offset,
-    simd_written_prefix_before_error_partial as avx2_written_prefix_partial,
-    simd_written_prefix_before_error_strict as avx2_written_prefix_strict, DS128_STORE_OFFSETS,
-    STORE_WIDTH_BYTES as AVX2_STORE_WIDTH_BYTES,
+    DS128_STORE_OFFSETS, STORE_WIDTH_BYTES as AVX2_STORE_WIDTH_BYTES,
     STRICT_DOUBLE_THRESHOLD as AVX2_STRICT_DOUBLE_THRESHOLD,
     STRICT_SINGLE_THRESHOLD as AVX2_STRICT_SINGLE_THRESHOLD,
     STRICT_TRIPLE_THRESHOLD as AVX2_STRICT_TRIPLE_THRESHOLD, TAIL_THRESHOLD as AVX2_TAIL_THRESHOLD,
+    non_strict_checks_offset as avx2_non_strict_checks_offset,
+    simd_written_prefix_before_error_partial as avx2_written_prefix_partial,
+    simd_written_prefix_before_error_strict as avx2_written_prefix_strict,
 };
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use crate::engine::models::avx512vbmi::{
-    can_run_double_es256 as avx512_can_run_double_es256,
-    can_run_single_es256 as avx512_can_run_single_es256,
-    non_strict_checks_offset as avx512_non_strict_checks_offset,
-    simd_written_prefix_before_error as avx512_written_prefix,
     DECODE_STORE_WIDTH_BYTES as AVX512_DECODE_STORE_WIDTH_BYTES,
     DOUBLE_ES256_BLOCK_STARTS as AVX512_DOUBLE_ES256_BLOCK_STARTS,
     DOUBLE_ES256_PRELOAD_STARTS as AVX512_DOUBLE_ES256_PRELOAD_STARTS,
@@ -30,24 +27,33 @@ use crate::engine::models::avx512vbmi::{
     DS256_STORE_OFFSETS as AVX512_DS256_STORE_OFFSETS,
     ES256_BLOCK_STARTS as AVX512_ES256_BLOCK_STARTS,
     SINGLE_ES256_REQUIRED_INPUT as AVX512_SINGLE_ES256_REQUIRED_INPUT,
+    can_run_double_es256 as avx512_can_run_double_es256,
+    can_run_single_es256 as avx512_can_run_single_es256,
+    non_strict_checks_offset as avx512_non_strict_checks_offset,
+    simd_written_prefix_before_error as avx512_written_prefix,
 };
 use crate::engine::models::neon::{
+    DECODE_BLOCK_OUTPUT_BYTES as NEON_DECODE_BLOCK_OUTPUT_BYTES,
+    DECODE_GROUP_OUTPUT_BYTES as NEON_DECODE_GROUP_OUTPUT_BYTES,
     can_run_encode_block as neon_can_run_encode_block,
     can_run_encode_pair as neon_can_run_encode_pair,
     encode_prefix_input_len as neon_encode_prefix_input_len,
     encode_prefix_output_len as neon_encode_prefix_output_len,
     non_strict_checks_offset as neon_non_strict_checks_offset,
     simd_written_prefix_before_error as neon_written_prefix,
-    DECODE_BLOCK_OUTPUT_BYTES as NEON_DECODE_BLOCK_OUTPUT_BYTES,
-    DECODE_GROUP_OUTPUT_BYTES as NEON_DECODE_GROUP_OUTPUT_BYTES,
 };
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use crate::engine::models::ssse3::{
-    aligned_non_strict_checks_offset, aligned_written_prefix_before_error,
     DS64_DOUBLE_STORE_OFFSETS, DS64_STORE_OFFSETS, STORE_WIDTH_BYTES,
+    aligned_non_strict_checks_offset, aligned_written_prefix_before_error,
 };
 use crate::engine::models::wasm_simd128::{
-    can_run_encode_drain as wasm_can_run_encode_drain,
+    DS64_DOUBLE_STORE_OFFSETS as WASM_DS64_DOUBLE_STORE_OFFSETS,
+    DS64_OUTPUT_BYTES as WASM_DS64_OUTPUT_BYTES, DS64_STORE_OFFSETS as WASM_DS64_STORE_OFFSETS,
+    ENCODE_DRAIN_REQUIRED_INPUT as WASM_ENCODE_DRAIN_REQUIRED_INPUT,
+    ENCODE_MAIN_REQUIRED_INPUT as WASM_ENCODE_MAIN_REQUIRED_INPUT,
+    ENCODE_TAIL_REQUIRED_INPUT as WASM_ENCODE_TAIL_REQUIRED_INPUT,
+    STORE_WIDTH_BYTES as WASM_STORE_WIDTH_BYTES, can_run_encode_drain as wasm_can_run_encode_drain,
     can_run_encode_main as wasm_can_run_encode_main,
     can_run_encode_tail as wasm_can_run_encode_tail,
     encode_prefix_input_len as wasm_encode_prefix_input_len,
@@ -55,15 +61,8 @@ use crate::engine::models::wasm_simd128::{
     non_strict_checks_offset as wasm_non_strict_checks_offset,
     pshufb_lookup_byte as wasm_pshufb_lookup_byte, pshufb_select_index as wasm_pshufb_select_index,
     simd_written_prefix_before_error as wasm_written_prefix, wasm_swizzle_select_index,
-    DS64_DOUBLE_STORE_OFFSETS as WASM_DS64_DOUBLE_STORE_OFFSETS,
-    DS64_OUTPUT_BYTES as WASM_DS64_OUTPUT_BYTES, DS64_STORE_OFFSETS as WASM_DS64_STORE_OFFSETS,
-    ENCODE_DRAIN_REQUIRED_INPUT as WASM_ENCODE_DRAIN_REQUIRED_INPUT,
-    ENCODE_MAIN_REQUIRED_INPUT as WASM_ENCODE_MAIN_REQUIRED_INPUT,
-    ENCODE_TAIL_REQUIRED_INPUT as WASM_ENCODE_TAIL_REQUIRED_INPUT,
-    STORE_WIDTH_BYTES as WASM_STORE_WIDTH_BYTES,
 };
-use crate::engine::scalar::{decoded_len_strict, encoded_len, ScalarDecoder};
-use crate::Base64Decoder;
+use crate::engine::scalar::{ScalarDecoder, decoded_len_strict, encoded_len};
 
 #[kani::proof]
 fn remaining_matches_pointer_delta_within_allocation() {

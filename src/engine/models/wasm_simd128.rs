@@ -32,11 +32,7 @@ pub const fn pshufb_select_index(ctrl: u8) -> Option<usize> {
 
 #[inline(always)]
 pub const fn wasm_swizzle_select_index(ctrl: u8) -> Option<usize> {
-    if ctrl < 16 {
-        Some(ctrl as usize)
-    } else {
-        None
-    }
+    if ctrl < 16 { Some(ctrl as usize) } else { None }
 }
 
 #[inline(always)]

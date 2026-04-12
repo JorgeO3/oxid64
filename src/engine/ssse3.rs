@@ -43,7 +43,7 @@
 //! The encoder is independent of [`DecodeOpts`].
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{b2i, w2i, Base64Decoder, DecodeOpts};
+use super::{Base64Decoder, DecodeOpts, b2i, w2i};
 use crate::engine::common::{
     assert_encode_capacity, can_advance, can_process_ds64, can_process_ds64_double,
     can_process_tail16, can_read, prepare_decode_output, remaining, safe_in_end_4,

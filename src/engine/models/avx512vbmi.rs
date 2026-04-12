@@ -96,9 +96,5 @@ pub fn simd_written_prefix_before_error(input_len: usize) -> usize {
 #[inline]
 pub fn simd_touched_prefix_before_error(input_len: usize) -> usize {
     let written = simd_written_prefix_before_error(input_len);
-    if written == 0 {
-        0
-    } else {
-        written + 16
-    }
+    if written == 0 { 0 } else { written + 16 }
 }

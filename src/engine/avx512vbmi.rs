@@ -6,7 +6,7 @@
 //! Requires Ice Lake or later.
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{d2i, w2i, Base64Decoder, DecodeOpts};
+use super::{Base64Decoder, DecodeOpts, d2i, w2i};
 use crate::engine::common::{assert_encode_capacity, prepare_decode_output, remaining};
 use crate::engine::models::avx512vbmi as verify_model;
 
@@ -537,10 +537,10 @@ mod decode_engine {
 #[allow(unsafe_op_in_unsafe_fn)]
 mod encode_engine {
     use super::verify_model::{
-        can_run_double_es256, can_run_single_es256, BLOCK_IN_BYTES, BLOCK_OUT_BYTES,
-        DOUBLE_ES256_BLOCK_STARTS, DOUBLE_ES256_INPUT_BYTES, DOUBLE_ES256_OUTPUT_BYTES,
-        DOUBLE_ES256_PRELOAD_STARTS, ES256_BLOCK_STARTS, ES256_INPUT_BYTES, ES256_OUTPUT_BYTES,
-        SINGLE_ES256_REQUIRED_INPUT,
+        BLOCK_IN_BYTES, BLOCK_OUT_BYTES, DOUBLE_ES256_BLOCK_STARTS, DOUBLE_ES256_INPUT_BYTES,
+        DOUBLE_ES256_OUTPUT_BYTES, DOUBLE_ES256_PRELOAD_STARTS, ES256_BLOCK_STARTS,
+        ES256_INPUT_BYTES, ES256_OUTPUT_BYTES, SINGLE_ES256_REQUIRED_INPUT, can_run_double_es256,
+        can_run_single_es256,
     };
     use super::*;
 

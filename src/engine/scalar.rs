@@ -459,20 +459,8 @@ pub const fn decoded_len_strict(b64: &[u8]) -> Option<usize> {
         return None;
     }
 
-    let mut i = 0usize;
-    while i + 4 < n {
-        if b64[i] == b'=' {
-            return None;
-        }
-        i += 1;
-    }
-
     let pad = if b64[n - 1] == b'=' {
-        if b64[n - 2] == b'=' {
-            2
-        } else {
-            1
-        }
+        if b64[n - 2] == b'=' { 2 } else { 1 }
     } else {
         0
     };
