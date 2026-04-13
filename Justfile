@@ -388,8 +388,8 @@ safety-phase0 fuzz_cases='5000' report='doc/safety/baseline.md': build-c
 # Run a shielded benchmark for stable/repeatable numbers (desktop Linux).
 bench-shield name save-baseline='' baseline='': build-c
 	bash ./scripts/bench_shield.sh \
-		--cpu 6,7 \
-		--run-cpu 7 \
+		--cpu 0,1 \
+		--run-cpu 1 \
 		--performance \
 		--stop-irqbalance \
 		--leave-irqbalance-stopped \
