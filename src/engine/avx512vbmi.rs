@@ -118,6 +118,36 @@ impl Base64Decoder for Avx512VbmiDecoder {
     }
 }
 
+/// Direct AVX-512 VBMI CHECK0 kernel entry for profiling.
+///
+/// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
+/// Callers must ensure AVX-512 VBMI is available.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn decode_avx512_kernel_partial(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
+    unsafe { decode_engine::decode_avx512(input, out) }
+}
+
+/// Direct AVX-512 VBMI strict kernel entry for profiling.
+///
+/// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
+/// Callers must ensure AVX-512 VBMI is available.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn decode_avx512_kernel_strict(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
+    unsafe { decode_engine::decode_avx512_strict(input, out) }
+}
+
+/// Direct AVX-512 VBMI encode kernel entry for profiling.
+///
+/// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
+/// Callers must ensure AVX-512 VBMI is available.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn encode_avx512_kernel(input: &[u8], out: &mut [u8]) -> (usize, usize) {
+    unsafe { encode_engine::encode_base64_avx512(input, out) }
+}
+
 // ---------------------------------------------------------------------------
 // Shared decode dispatch (mirrors avx2::dispatch_decode)
 // ---------------------------------------------------------------------------
