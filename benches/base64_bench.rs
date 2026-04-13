@@ -1,10 +1,10 @@
 #![allow(warnings)]
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use oxid64::engine::DecodeOpts;
 use oxid64::engine::avx2::Avx2Decoder;
 use oxid64::engine::avx512vbmi::Avx512VbmiDecoder;
 use oxid64::engine::scalar::{decode_base64_fast, decoded_len_strict, encode_base64_fast};
 use oxid64::engine::ssse3::Ssse3Decoder;
-use oxid64::engine::DecodeOpts;
 use std::sync::Once;
 
 const TURBO_STYLE_SIZES: [usize; 2] = [10_000, 1_000_000];
@@ -43,11 +43,7 @@ fn has_avx512vbmi() -> bool {
 }
 
 fn yn(b: bool) -> &'static str {
-    if b {
-        "YES"
-    } else {
-        "no"
-    }
+    if b { "YES" } else { "no" }
 }
 
 /// Print a one-time banner showing which ISAs are available on this CPU.

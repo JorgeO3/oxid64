@@ -16,12 +16,15 @@ Options:
   --target-dir PATH   Cargo target dir (default: /tmp/oxid64_portable)
   --out-dir PATH      Output directory (default: perf_reports)
   --report PATH       Output markdown report path (default: <out-dir>/perf_decode_<timestamp>.md)
+  --modes "..."       Space-separated perf_compare modes to run
+  --list-modes        Print supported decode modes and exit
   --skip-asm          Skip cargo asm section
   -h, --help          Show this help
 
 Notes:
-  - Builds in release mode without forcing target-cpu=native.
-  - Captures rust decoder (rustdec) and Turbo C fast decoder (cfastdec).
+  - Builds perf_compare in release mode without forcing target-cpu=native.
+  - By default runs all supported decode modes exposed by perf_compare.
+  - Use --modes to narrow the report to a smaller set.
 EOF
 }
 
@@ -34,6 +37,8 @@ FREQ=999
 TARGET_DIR="/tmp/oxid64_portable"
 OUT_DIR="perf_reports"
 REPORT=""
+MODES=""
+LIST_MODES=0
 SKIP_ASM=0
 EVENTS="cycles,instructions,branches,branch-misses,L1-dcache-load-misses,LLC-load-misses"
 
@@ -48,6 +53,8 @@ while [[ $# -gt 0 ]]; do
         --target-dir) TARGET_DIR="$2"; shift 2 ;;
         --out-dir) OUT_DIR="$2"; shift 2 ;;
         --report) REPORT="$2"; shift 2 ;;
+        --modes) MODES="$2"; shift 2 ;;
+        --list-modes) LIST_MODES=1; shift ;;
         --skip-asm) SKIP_ASM=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *)
@@ -59,11 +66,160 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_cmd() {
-    local c="$1"
-    if ! command -v "$c" >/dev/null 2>&1; then
-        echo "Missing required command: $c" >&2
+    local cmd="$1"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "Missing required command: $cmd" >&2
         exit 1
     fi
+}
+
+run_cmd() {
+    local title="$1"
+    shift
+    echo "## ${title}"
+    echo '```bash'
+    printf '%q ' "$@"
+    echo
+    echo '```'
+    "$@"
+    echo
+}
+
+run_optional_cmd() {
+    local title="$1"
+    shift
+    echo "## ${title}"
+    echo '```bash'
+    printf '%q ' "$@"
+    echo
+    echo '```'
+    set +e
+    "$@"
+    local rc=$?
+    set -e
+    if [[ $rc -ne 0 ]]; then
+        echo
+        echo "Command exited with status ${rc}"
+    fi
+    echo
+}
+
+mode_symbol() {
+    case "$1" in
+        oxid64-ssse3-strict-api|oxid64-ssse3-strict-kernel)
+            printf '%s\n' 'oxid64::engine::ssse3::decode_engine::decode_ssse3_strict'
+            ;;
+        oxid64-ssse3-nonstrict-api|oxid64-ssse3-nonstrict-kernel)
+            printf '%s\n' 'oxid64::engine::ssse3::decode_engine::decode_ssse3'
+            ;;
+        tb64-ssse3-check)
+            printf '%s\n' 'tb64v128dec_b64check'
+            ;;
+        tb64-ssse3-partial)
+            printf '%s\n' 'tb64v128dec'
+            ;;
+        tb64-ssse3-unchecked)
+            printf '%s\n' 'tb64v128dec_nb64check'
+            ;;
+        oxid64-avx2-strict-api|oxid64-avx2-strict-kernel)
+            printf '%s\n' 'oxid64::engine::avx2::decode_engine::decode_avx2_strict'
+            ;;
+        oxid64-avx2-nonstrict-api|oxid64-avx2-nonstrict-kernel)
+            printf '%s\n' 'oxid64::engine::avx2::decode_engine::decode_avx2'
+            ;;
+        oxid64-avx2-unchecked-kernel)
+            printf '%s\n' 'oxid64::engine::avx2::decode_engine::decode_avx2_unchecked'
+            ;;
+        tb64-avx2-check)
+            printf '%s\n' 'tb64v256dec_b64check'
+            ;;
+        tb64-avx2-partial)
+            printf '%s\n' 'tb64v256dec'
+            ;;
+        tb64-avx2-unchecked)
+            printf '%s\n' 'tb64v256dec_nb64check'
+            ;;
+        fastbase64-avx2-check)
+            printf '%s\n' 'fast_avx2_base64_decode'
+            ;;
+        oxid64-avx512-strict-api|oxid64-avx512-strict-kernel)
+            printf '%s\n' 'oxid64::engine::avx512vbmi::decode_engine::decode_avx512_strict'
+            ;;
+        oxid64-avx512-nonstrict-api|oxid64-avx512-nonstrict-kernel)
+            printf '%s\n' 'oxid64::engine::avx512vbmi::decode_engine::decode_avx512'
+            ;;
+        tb64-avx512-check)
+            printf '%s\n' 'tb64v512dec_b64check'
+            ;;
+        tb64-avx512-partial)
+            printf '%s\n' 'tb64v512dec'
+            ;;
+        tb64-avx512-unchecked)
+            printf '%s\n' 'tb64v512dec_nb64check'
+            ;;
+        *)
+            printf '\n'
+            ;;
+    esac
+}
+
+mode_asm_symbol() {
+    case "$1" in
+        oxid64-ssse3-strict-api|oxid64-ssse3-strict-kernel)
+            printf '%s\n' 'oxid64::engine::ssse3::decode_engine::decode_ssse3_strict'
+            ;;
+        oxid64-ssse3-nonstrict-api|oxid64-ssse3-nonstrict-kernel)
+            printf '%s\n' 'oxid64::engine::ssse3::decode_engine::decode_ssse3'
+            ;;
+        oxid64-avx2-strict-api|oxid64-avx2-strict-kernel)
+            printf '%s\n' 'oxid64::engine::avx2::decode_engine::decode_avx2_strict'
+            ;;
+        oxid64-avx2-nonstrict-api|oxid64-avx2-nonstrict-kernel)
+            printf '%s\n' 'oxid64::engine::avx2::decode_engine::decode_avx2'
+            ;;
+        oxid64-avx2-unchecked-kernel)
+            printf '%s\n' 'oxid64::engine::avx2::decode_engine::decode_avx2_unchecked'
+            ;;
+        oxid64-avx512-strict-api|oxid64-avx512-strict-kernel)
+            printf '%s\n' 'oxid64::engine::avx512vbmi::decode_engine::decode_avx512_strict'
+            ;;
+        oxid64-avx512-nonstrict-api|oxid64-avx512-nonstrict-kernel)
+            printf '%s\n' 'oxid64::engine::avx512vbmi::decode_engine::decode_avx512'
+            ;;
+        *)
+            printf '\n'
+            ;;
+    esac
+}
+
+sanitize_mode() {
+    printf '%s\n' "$1" | tr '/:' '__' | tr '-' '_'
+}
+
+contains_mode() {
+    local needle="$1"
+    shift
+    local item
+    for item in "$@"; do
+        if [[ "$item" == "$needle" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+run_throughput() {
+    local mode="$1"
+    echo "## Throughput ${mode}"
+    for ((i = 1; i <= RUNS; i++)); do
+        echo "### Run ${i}/${RUNS}"
+        echo '```bash'
+        printf '%q ' taskset -c "$CORE" "$PERF_BIN" "$mode" "$SIZE" "$ITERS"
+        echo
+        echo '```'
+        taskset -c "$CORE" "$PERF_BIN" "$mode" "$SIZE" "$ITERS"
+        echo
+    done
 }
 
 require_cmd cargo
@@ -78,38 +234,9 @@ fi
 mkdir -p "$(dirname "$REPORT")"
 touch "$REPORT"
 
-rust_data="$OUT_DIR/rustdec_${ts}.data"
-cfast_data="$OUT_DIR/cfastdec_${ts}.data"
-asm_file="$OUT_DIR/asm_rustdec_${ts}.s"
-perf_bin="$TARGET_DIR/release/perf_compare"
+PERF_BIN="$TARGET_DIR/release/perf_compare"
 
 exec > >(tee -a "$REPORT") 2>&1
-
-run_cmd() {
-    local title="$1"
-    shift
-    echo "## ${title}"
-    echo '```bash'
-    printf '%q ' "$@"
-    echo
-    echo '```'
-    "$@"
-    echo
-}
-
-run_throughput() {
-    local mode="$1"
-    echo "## Throughput ${mode}"
-    for ((i = 1; i <= RUNS; i++)); do
-        echo "### Run ${i}/${RUNS}"
-        echo '```bash'
-        printf '%q ' taskset -c "$CORE" "$perf_bin" "$mode" "$SIZE" "$ITERS"
-        echo
-        echo '```'
-        taskset -c "$CORE" "$perf_bin" "$mode" "$SIZE" "$ITERS"
-        echo
-    done
-}
 
 echo "# Decode Perf Report"
 echo
@@ -128,29 +255,106 @@ echo
 run_cmd "Git revision" git rev-parse --short HEAD
 run_cmd "Build perf_compare (portable release)" env CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --bin perf_compare
 
-if [[ ! -x "$perf_bin" ]]; then
-    echo "Expected binary not found: $perf_bin" >&2
+if [[ ! -x "$PERF_BIN" ]]; then
+    echo "Expected binary not found: $PERF_BIN" >&2
     exit 1
 fi
 
-run_throughput rustdec
-run_throughput cfastdec
+mapfile -t SUPPORTED_MODES < <("$PERF_BIN" --supported)
 
-run_cmd "perf stat rustdec" perf stat -r "$STAT_RUNS" -e "$EVENTS" taskset -c "$CORE" "$perf_bin" rustdec "$SIZE" "$ITERS"
-run_cmd "perf stat cfastdec" perf stat -r "$STAT_RUNS" -e "$EVENTS" taskset -c "$CORE" "$perf_bin" cfastdec "$SIZE" "$ITERS"
+if [[ "$LIST_MODES" -eq 1 ]]; then
+    printf '%s\n' "${SUPPORTED_MODES[@]}"
+    exit 0
+fi
 
-run_cmd "perf record rustdec" perf record -o "$rust_data" -F "$FREQ" -g --call-graph fp -- taskset -c "$CORE" "$perf_bin" rustdec "$SIZE" "$ITERS"
-run_cmd "perf report rustdec (symbol,dso)" perf report -i "$rust_data" --stdio --sort symbol,dso
-run_cmd "perf annotate rustdec hot symbol" perf annotate -i "$rust_data" --stdio --symbol "oxid64::scalar::decode_base64_fast"
+DEFAULT_MODES=(
+    oxid64-ssse3-strict-api
+    oxid64-ssse3-strict-kernel
+    oxid64-ssse3-nonstrict-api
+    oxid64-ssse3-nonstrict-kernel
+    tb64-ssse3-check
+    tb64-ssse3-partial
+    tb64-ssse3-unchecked
+    oxid64-avx2-strict-api
+    oxid64-avx2-strict-kernel
+    oxid64-avx2-nonstrict-api
+    oxid64-avx2-nonstrict-kernel
+    oxid64-avx2-unchecked-kernel
+    tb64-avx2-check
+    tb64-avx2-partial
+    tb64-avx2-unchecked
+    fastbase64-avx2-check
+    oxid64-avx512-strict-api
+    oxid64-avx512-strict-kernel
+    oxid64-avx512-nonstrict-api
+    oxid64-avx512-nonstrict-kernel
+    tb64-avx512-check
+    tb64-avx512-partial
+    tb64-avx512-unchecked
+)
 
-run_cmd "perf record cfastdec" perf record -o "$cfast_data" -F "$FREQ" -g --call-graph fp -- taskset -c "$CORE" "$perf_bin" cfastdec "$SIZE" "$ITERS"
-run_cmd "perf report cfastdec (symbol,dso)" perf report -i "$cfast_data" --stdio --sort symbol,dso
-run_cmd "perf annotate cfastdec hot symbol" perf annotate -i "$cfast_data" --stdio --symbol "tb64xdec"
+if [[ -n "$MODES" ]]; then
+    read -r -a REQUESTED_MODES <<<"$MODES"
+else
+    REQUESTED_MODES=("${DEFAULT_MODES[@]}")
+fi
+
+ACTIVE_MODES=()
+for mode in "${REQUESTED_MODES[@]}"; do
+    if contains_mode "$mode" "${SUPPORTED_MODES[@]}"; then
+        ACTIVE_MODES+=("$mode")
+    else
+        if [[ -n "$MODES" ]]; then
+            echo "Requested mode is not supported on this host: $mode" >&2
+            exit 1
+        fi
+    fi
+done
+
+if [[ ${#ACTIVE_MODES[@]} -eq 0 ]]; then
+    echo "No supported decode modes selected" >&2
+    exit 1
+fi
+
+echo "## Active modes"
+for mode in "${ACTIVE_MODES[@]}"; do
+    echo "- ${mode}"
+done
+echo
+
+DATA_FILES=()
+ASM_SYMBOLS=()
+for mode in "${ACTIVE_MODES[@]}"; do
+    run_throughput "$mode"
+
+    safe_mode="$(sanitize_mode "$mode")"
+    data_file="$OUT_DIR/${safe_mode}_${ts}.data"
+    DATA_FILES+=("$data_file")
+
+    run_cmd "perf stat ${mode}" perf stat -r "$STAT_RUNS" -e "$EVENTS" taskset -c "$CORE" "$PERF_BIN" "$mode" "$SIZE" "$ITERS"
+    run_cmd "perf record ${mode}" perf record -o "$data_file" -F "$FREQ" -g --call-graph fp -- taskset -c "$CORE" "$PERF_BIN" "$mode" "$SIZE" "$ITERS"
+    run_cmd "perf report ${mode} (symbol,dso)" perf report -i "$data_file" --stdio --sort symbol,dso
+
+    symbol="$(mode_symbol "$mode")"
+    if [[ -n "$symbol" ]]; then
+        run_optional_cmd "perf annotate ${mode}" perf annotate -i "$data_file" --stdio --symbol "$symbol"
+    fi
+
+    asm_symbol="$(mode_asm_symbol "$mode")"
+    if [[ -n "$asm_symbol" ]] && ! contains_mode "$asm_symbol" "${ASM_SYMBOLS[@]}"; then
+        ASM_SYMBOLS+=("$asm_symbol")
+    fi
+done
 
 if [[ "$SKIP_ASM" -eq 0 ]]; then
-    run_cmd "cargo asm dump (rust decode)" env CARGO_TARGET_DIR="$TARGET_DIR" cargo asm --lib --intel oxid64::scalar::decode_base64_fast
-    run_cmd "cargo asm saved copy" env CARGO_TARGET_DIR="$TARGET_DIR" bash -lc "cargo asm --lib --intel oxid64::scalar::decode_base64_fast > '$asm_file'"
-    run_cmd "cargo asm first 220 lines" sed -n '1,220p' "$asm_file"
+    echo "## cargo asm"
+    echo
+    for asm_symbol in "${ASM_SYMBOLS[@]}"; do
+        safe_symbol="$(sanitize_mode "$asm_symbol")"
+        asm_file="$OUT_DIR/${safe_symbol}_${ts}.s"
+        run_optional_cmd "cargo asm dump ${asm_symbol}" env CARGO_TARGET_DIR="$TARGET_DIR" cargo asm --lib --intel "$asm_symbol"
+        run_optional_cmd "cargo asm saved copy ${asm_symbol}" env CARGO_TARGET_DIR="$TARGET_DIR" bash -lc "cargo asm --lib --intel '$asm_symbol' > '$asm_file'"
+    done
 else
     echo "## cargo asm"
     echo "Skipped (--skip-asm)"
@@ -158,10 +362,14 @@ else
 fi
 
 echo "## Artifacts"
-echo "- rustdec perf.data: \`$rust_data\`"
-echo "- cfastdec perf.data: \`$cfast_data\`"
+for data_file in "${DATA_FILES[@]}"; do
+    printf -- '- perf.data: `%s`\n' "$data_file"
+done
 if [[ "$SKIP_ASM" -eq 0 ]]; then
-    echo "- rust asm dump: \`$asm_file\`"
+    for asm_symbol in "${ASM_SYMBOLS[@]}"; do
+        safe_symbol="$(sanitize_mode "$asm_symbol")"
+        printf -- '- cargo asm: `%s`\n' "$OUT_DIR/${safe_symbol}_${ts}.s"
+    done
 fi
 echo
 echo "Report completed: $REPORT"
