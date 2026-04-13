@@ -5,7 +5,7 @@
 //! processed in parallel per `__m256i` register.
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{b2i, w2i, Base64Decoder, DecodeOpts};
+use super::{Base64Decoder, DecodeOpts, b2i, w2i};
 use crate::engine::common::{assert_encode_capacity, prepare_decode_output, remaining};
 use crate::engine::models::avx2 as verify_model;
 
@@ -183,6 +183,16 @@ pub unsafe fn decode_avx2_kernel_partial(input: &[u8], out: &mut [u8]) -> Option
     unsafe { decode_engine::decode_avx2(input, out) }
 }
 
+/// Direct AVX2 strict kernel entry for profiling.
+///
+/// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
+/// Callers must ensure AVX2 is available.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn decode_avx2_kernel_strict(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
+    unsafe { decode_engine::decode_avx2_strict(input, out) }
+}
+
 /// Direct AVX2 unchecked kernel entry for profiling.
 ///
 /// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
@@ -191,6 +201,16 @@ pub unsafe fn decode_avx2_kernel_partial(input: &[u8], out: &mut [u8]) -> Option
 #[inline]
 pub unsafe fn decode_avx2_kernel_unchecked(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
     unsafe { decode_engine::decode_avx2_unchecked(input, out) }
+}
+
+/// Direct AVX2 encode kernel entry for profiling.
+///
+/// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
+/// Callers must ensure AVX2 is available.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn encode_avx2_kernel(input: &[u8], out: &mut [u8]) -> (usize, usize) {
+    unsafe { avx2_engine::encode_base64_avx2(input, out) }
 }
 
 // ---------------------------------------------------------------------------

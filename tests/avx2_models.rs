@@ -1,3 +1,4 @@
+use oxid64::engine::DecodeOpts;
 use oxid64::engine::avx2::Avx2Decoder;
 use oxid64::engine::models::avx2::{
     non_strict_checks_offset, simd_touched_prefix_before_error_partial,
@@ -5,7 +6,6 @@ use oxid64::engine::models::avx2::{
     simd_written_prefix_before_error_strict,
 };
 use oxid64::engine::scalar::encode_base64_fast;
-use oxid64::engine::DecodeOpts;
 
 #[repr(align(32))]
 struct Aligned<const N: usize>([u8; N]);
