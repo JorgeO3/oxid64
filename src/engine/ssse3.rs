@@ -43,7 +43,7 @@
 //! The encoder is independent of [`DecodeOpts`].
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{b2i, w2i, Base64Decoder, DecodeOpts};
+use super::{Base64Decoder, DecodeOpts, b2i, w2i};
 use crate::engine::common::{
     assert_encode_capacity, can_advance, can_process_ds64, can_process_tail16, can_read,
     prepare_decode_output, safe_in_end_4,
@@ -176,6 +176,16 @@ impl Base64Decoder for Ssse3Decoder {
 #[inline]
 pub unsafe fn decode_ssse3_kernel_partial(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
     unsafe { decode_engine::decode_ssse3(input, out) }
+}
+
+/// Direct SSSE3 strict kernel entry for profiling.
+///
+/// Returns `(consumed, written)` from the SIMD kernel without scalar tail.
+/// Callers must ensure SSSE3 is available.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn decode_ssse3_kernel_strict(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
+    unsafe { decode_engine::decode_ssse3_strict(input, out) }
 }
 
 /// Direct SSSE3 encode kernel entry for profiling.
