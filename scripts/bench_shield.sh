@@ -431,7 +431,7 @@ if [[ "$DIRECT_BENCH" == "1" ]]; then
   done
 
   echo "==> Building bench target (no-run): $DIRECT_BENCH_NAME"
-  run_as_user cargo bench --bench "$DIRECT_BENCH_NAME" --no-run >/dev/null
+  run_as_user cargo bench --features c-benchmarks --bench "$DIRECT_BENCH_NAME" --no-run >/dev/null
 
   EXE="$(ls -t "target/release/deps/${DIRECT_BENCH_NAME}-"* 2>/dev/null | head -n 1 || true)"
   [[ -n "$EXE" && -x "$EXE" ]] || die "could not find bench executable for '${DIRECT_BENCH_NAME}' under target/release/deps"

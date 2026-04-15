@@ -44,8 +44,8 @@ If you are an agent, follow these rules and commands before coding.
 ## Benchmarks and Performance Tooling
 
 ### Criterion benches
-- Run all benches: `cargo bench`
-- Single bench: `cargo bench --bench base64_bench -- "Base64 Decoding/Rust Port (SSSE3 Strict)/1048576" --exact --noplot`
+- Run all benches: `cargo bench --features c-benchmarks`
+- Single bench: `cargo bench --features c-benchmarks --bench base64_bench -- "Base64 Decoding/Rust Port (SSSE3 Strict)/1048576" --exact --noplot`
 
 ### SSE strict harness
 - Harness (asm + bench + perf): `scripts/sse_strict_harness.sh --variant strict`

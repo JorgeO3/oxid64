@@ -358,7 +358,7 @@ verify-wasm-simd128-smoke runs='8': build-c
 
 # Run benchmarks using criterion, linking the C library
 bench: build-c
-	cargo bench
+	cargo bench --features c-benchmarks
 
 # Safety verification matrix (best-effort local pass, full mode).
 verify-safety fuzz_cases='5000': build-c

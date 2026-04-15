@@ -174,7 +174,7 @@ touch "$REPORT"
 
 BENCH_BIN=""
 if [[ "$SKIP_PERF" -eq 0 ]]; then
-    cargo bench --bench base64_bench --no-run >/dev/null
+    cargo bench --features c-benchmarks --bench base64_bench --no-run >/dev/null
     BENCH_BIN="$(ls -t target/release/deps/base64_bench-* | head -n1)"
 fi
 
@@ -313,12 +313,12 @@ run_one_variant() {
             echo "### cargo bench (exact)"
             echo
             echo '```bash'
-            printf 'taskset -c %q cargo bench --bench base64_bench -- %q --exact --noplot\n' "$CORE" "$target"
+            printf 'taskset -c %q cargo bench --features c-benchmarks --bench base64_bench -- %q --exact --noplot\n' "$CORE" "$target"
             echo '```'
             echo
         } >> "$REPORT"
 
-        taskset -c "$CORE" cargo bench --bench base64_bench -- "$target" --exact --noplot \
+        taskset -c "$CORE" cargo bench --features c-benchmarks --bench base64_bench -- "$target" --exact --noplot \
             > "$bench_log" 2>&1
 
         THRPT_MID[$key]="$(extract_thrpt_mid "$bench_log")"

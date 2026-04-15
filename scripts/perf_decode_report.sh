@@ -253,7 +253,7 @@ echo "- Report path: ${REPORT}"
 echo
 
 run_cmd "Git revision" git rev-parse --short HEAD
-run_cmd "Build perf_compare (portable release)" env CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --bin perf_compare
+run_cmd "Build perf_compare (portable release)" env CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --features c-benchmarks --bin perf_compare
 
 if [[ ! -x "$PERF_BIN" ]]; then
     echo "Expected binary not found: $PERF_BIN" >&2
