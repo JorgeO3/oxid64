@@ -8,7 +8,8 @@ If you are an agent, follow these rules and commands before coding.
 
 ## Quick Start
 - Use `just` for common tasks.
-- Build the Turbo-Base64 C library before tests/benchmarks.
+- `just test` runs the full test suite; no manual C build needed first.
+- `just bench` runs benchmarks; C libraries are built automatically by `build.rs`.
 - Prefer strict correctness paths unless a task explicitly targets non-strict.
 
 ## Build, Lint, Test
@@ -37,27 +38,36 @@ If you are an agent, follow these rules and commands before coding.
 - Proptest case (filter): `cargo test proptest:: -- --nocapture`
 
 ### C dependency
-- C static lib for comparisons: `just build-c` (wraps `make libtb64.a` in `Turbo-Base64/`)
-- If you only need Rust builds, you can skip `build-c` but benches and some
-  comparisons require it.
+- C static lib for comparisons is built automatically by `build.rs` when the
+  `c-benchmarks` feature is active.  Manual `just build-c` is only needed if
+  you want to inspect or update the prebuilt `Turbo-Base64/libtb64.a` (no
+  longer linked by the build system — kept for reference only).
 
 ## Benchmarks and Performance Tooling
 
 ### Criterion benches
 - Run all benches: `cargo bench --features c-benchmarks`
-- Single bench: `cargo bench --features c-benchmarks --bench base64_bench -- "Base64 Decoding/Rust Port (SSSE3 Strict)/1048576" --exact --noplot`
+- Single bench (x86): `cargo bench --features c-benchmarks --bench base64_bench -- "Decode (Checked)/oxid64 ssse3 strict/1000000" --exact --noplot`
+- Single bench (aarch64): `cargo bench --features c-benchmarks --bench base64_bench -- "Decode (Checked)/oxid64 neon strict/1000000" --exact --noplot`
 
-### SSE strict harness
+### perf_compare (x86 and aarch64)
+- Build: `cargo build --release --features "c-benchmarks,perf-tools" --bin perf_compare`
+- List all modes: `./target/release/perf_compare --list`
+- List supported modes on this CPU: `./target/release/perf_compare --supported`
+- Run a mode: `./target/release/perf_compare oxid64-avx2-strict-api 1048576 10000`
+
+### SSE strict harness (x86 only)
 - Harness (asm + bench + perf): `scripts/sse_strict_harness.sh --variant strict`
 - Sweep variants and rank: `scripts/sse_strict_sweep.sh --rounds 2 --top-k 4`
 
-### Perf decode report
+### Perf decode report (x86 and aarch64)
 - Full perf report: `scripts/perf_decode_report.sh`
+- Modes are detected automatically from `perf_compare --supported` on the host.
 
 ### Bench shielding (repeatability)
 - Use `scripts/bench_shield.sh` for CPU isolation and stable measurements.
 - Example:
-  `./scripts/bench_shield.sh --cpu 6,7 --run-cpu 7 --performance --no-turbo --direct-bench base64_bench -- "Base64 Decoding/Rust Port (Safe Scalar)/1048576" --exact --noplot`
+  `./scripts/bench_shield.sh --cpu 6,7 --run-cpu 7 --performance --no-turbo --direct-bench base64_bench -- "Decode (Checked)/oxid64 avx2 strict/1000000" --exact --noplot`
 
 ## Repo Layout
 - `src/lib.rs`: crate root, exports `engine` and `Decoder`.

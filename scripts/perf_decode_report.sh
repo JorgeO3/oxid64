@@ -157,6 +157,21 @@ mode_symbol() {
         tb64-avx512-unchecked)
             printf '%s\n' 'tb64v512dec_nb64check'
             ;;
+        oxid64-neon-strict-api|oxid64-neon-strict-kernel)
+            printf '%s\n' 'oxid64::engine::neon::decode_engine::decode_neon_strict'
+            ;;
+        oxid64-neon-nonstrict-api|oxid64-neon-nonstrict-kernel)
+            printf '%s\n' 'oxid64::engine::neon::decode_engine::decode_neon'
+            ;;
+        tb64-neon-check)
+            printf '%s\n' 'tb64v128dec_b64check'
+            ;;
+        tb64-neon-partial)
+            printf '%s\n' 'tb64v128dec'
+            ;;
+        tb64-neon-unchecked)
+            printf '%s\n' 'tb64v128dec_nb64check'
+            ;;
         *)
             printf '\n'
             ;;
@@ -185,6 +200,12 @@ mode_asm_symbol() {
             ;;
         oxid64-avx512-nonstrict-api|oxid64-avx512-nonstrict-kernel)
             printf '%s\n' 'oxid64::engine::avx512vbmi::decode_engine::decode_avx512'
+            ;;
+        oxid64-neon-strict-api|oxid64-neon-strict-kernel)
+            printf '%s\n' 'oxid64::engine::neon::decode_engine::decode_neon_strict'
+            ;;
+        oxid64-neon-nonstrict-api|oxid64-neon-nonstrict-kernel)
+            printf '%s\n' 'oxid64::engine::neon::decode_engine::decode_neon'
             ;;
         *)
             printf '\n'
@@ -253,7 +274,7 @@ echo "- Report path: ${REPORT}"
 echo
 
 run_cmd "Git revision" git rev-parse --short HEAD
-run_cmd "Build perf_compare (portable release)" env CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --features c-benchmarks --bin perf_compare
+run_cmd "Build perf_compare (portable release)" env CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --features "c-benchmarks,perf-tools" --bin perf_compare
 
 if [[ ! -x "$PERF_BIN" ]]; then
     echo "Expected binary not found: $PERF_BIN" >&2
@@ -267,36 +288,17 @@ if [[ "$LIST_MODES" -eq 1 ]]; then
     exit 0
 fi
 
-DEFAULT_MODES=(
-    oxid64-ssse3-strict-api
-    oxid64-ssse3-strict-kernel
-    oxid64-ssse3-nonstrict-api
-    oxid64-ssse3-nonstrict-kernel
-    tb64-ssse3-check
-    tb64-ssse3-partial
-    tb64-ssse3-unchecked
-    oxid64-avx2-strict-api
-    oxid64-avx2-strict-kernel
-    oxid64-avx2-nonstrict-api
-    oxid64-avx2-nonstrict-kernel
-    oxid64-avx2-unchecked-kernel
-    tb64-avx2-check
-    tb64-avx2-partial
-    tb64-avx2-unchecked
-    fastbase64-avx2-check
-    oxid64-avx512-strict-api
-    oxid64-avx512-strict-kernel
-    oxid64-avx512-nonstrict-api
-    oxid64-avx512-nonstrict-kernel
-    tb64-avx512-check
-    tb64-avx512-partial
-    tb64-avx512-unchecked
-)
-
 if [[ -n "$MODES" ]]; then
     read -r -a REQUESTED_MODES <<<"$MODES"
 else
-    REQUESTED_MODES=("${DEFAULT_MODES[@]}")
+    # Default: use all supported decode modes reported by perf_compare on this host.
+    # Filter to decode-only (exclude encode modes) so the report stays focused.
+    REQUESTED_MODES=()
+    for mode in "${SUPPORTED_MODES[@]}"; do
+        if [[ "$mode" != *"-encode"* ]]; then
+            REQUESTED_MODES+=("$mode")
+        fi
+    done
 fi
 
 ACTIVE_MODES=()

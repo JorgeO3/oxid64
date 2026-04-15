@@ -356,8 +356,8 @@ verify-wasm-simd128-smoke runs='8': build-c
 	just fuzz-build-wasm
 	just fuzz-smoke-wasm runs={{runs}}
 
-# Run benchmarks using criterion, linking the C library
-bench: build-c
+# Run benchmarks using criterion (C libraries are built automatically by build.rs)
+bench:
 	cargo bench --features c-benchmarks
 
 # Safety verification matrix (best-effort local pass, full mode).
@@ -386,7 +386,7 @@ safety-phase0 fuzz_cases='5000' report='doc/safety/baseline.md': build-c
 	./scripts/verify_safety.sh --fuzz-cases {{fuzz_cases}}
 
 # Run a shielded benchmark for stable/repeatable numbers (desktop Linux).
-bench-shield name save-baseline='' baseline='': build-c
+bench-shield name save-baseline='' baseline='':
 	bash ./scripts/bench_shield.sh \
 		--cpu 0,1 \
 		--run-cpu 1 \
@@ -404,7 +404,7 @@ bench-shield name save-baseline='' baseline='': build-c
 		{{ if baseline != '' { "--baseline $baseline" } else { "" } }}
 
 # Run bench_shield with custom script/criterion args.
-bench-shield-custom *args: build-c
+bench-shield-custom *args:
 	./scripts/bench_shield.sh {{args}}
 
 # Format Rust code

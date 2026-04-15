@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This script is x86 / x86_64 only.  Exit early with a clear message on other architectures.
+arch="$(uname -m)"
+case "$arch" in
+    x86_64|i686|i386) ;;
+    *)
+        echo "sse_strict_harness.sh: this script requires an x86/x86_64 host (detected: ${arch})." >&2
+        exit 1
+        ;;
+esac
+
 usage() {
     cat <<'USAGE'
 Usage:
