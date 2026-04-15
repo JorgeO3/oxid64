@@ -277,19 +277,16 @@ mod decode_engine {
     // Process one 64-byte block: load, de-lookup, pack, store
     // -----------------------------------------------------------------------
 
-    /// Decode one 64-byte block: `vld4q_u8` → de-lookup → bitpack → `vst3q_u8`.
-    ///
-    /// Returns the four de-looked-up lanes (before packing) so the caller can
-    /// optionally feed them to `b64chk`.
+    /// Decode one 64-byte block without validation.
     #[inline]
     #[target_feature(enable = "neon")]
-    unsafe fn decode_block(
+    unsafe fn decode_block_unchecked(
         ip: *const u8,
         op: *mut u8,
         vlut0: uint8x16x4_t,
         vlut1: uint8x16x4_t,
         cv40: uint8x16_t,
-    ) -> (uint8x16_t, uint8x16_t, uint8x16_t, uint8x16_t) {
+    ) {
         let iv = vld4q_u8(ip);
 
         let d0 = delookup(iv.0, vlut0, vlut1, cv40);
@@ -299,8 +296,33 @@ mod decode_engine {
 
         let ov = bitpack(d0, d1, d2, d3);
         vst3q_u8(op, ov);
+    }
 
-        (d0, d1, d2, d3)
+    /// Decode one 64-byte block and accumulate invalid-byte markers.
+    ///
+    /// Keeping the validation fold in the same helper as the decode/store path
+    /// reduces vector tuple plumbing in the hot loop and more closely matches
+    /// the scheduling style used by the Turbo-Base64 C implementation.
+    #[inline]
+    #[target_feature(enable = "neon")]
+    unsafe fn decode_block_checked(
+        ip: *const u8,
+        op: *mut u8,
+        vlut0: uint8x16x4_t,
+        vlut1: uint8x16x4_t,
+        cv40: uint8x16_t,
+        xv: &mut uint8x16_t,
+    ) {
+        let iv = vld4q_u8(ip);
+
+        let d0 = delookup(iv.0, vlut0, vlut1, cv40);
+        let d1 = delookup(iv.1, vlut0, vlut1, cv40);
+        let d2 = delookup(iv.2, vlut0, vlut1, cv40);
+        let d3 = delookup(iv.3, vlut0, vlut1, cv40);
+
+        let ov = bitpack(d0, d1, d2, d3);
+        *xv = b64chk(d0, d1, d2, d3, *xv);
+        vst3q_u8(op, ov);
     }
 
     // -----------------------------------------------------------------------
@@ -339,30 +361,17 @@ mod decode_engine {
 
         while remaining(ip, in_end) > DN {
             // Block 0 (ip + 0): CHECK1 in non-strict → skip check
-            let (d0, d1, d2, d3) = decode_block(ip, op, vlut0, vlut1, cv40);
+            decode_block_unchecked(ip, op, vlut0, vlut1, cv40);
             // Block 1 (ip + 64): CHECK1 → skip check
-            let _ = decode_block(ip.add(64), op.add(48), vlut0, vlut1, cv40);
+            decode_block_unchecked(ip.add(64), op.add(48), vlut0, vlut1, cv40);
             // Block 2 (ip + 128): CHECK1 → skip check
-            let _ = decode_block(ip.add(128), op.add(96), vlut0, vlut1, cv40);
+            decode_block_unchecked(ip.add(128), op.add(96), vlut0, vlut1, cv40);
             // Block 3 (ip + 192): CHECK0 → always check
-            let (e0, e1, e2, e3) = decode_block(ip.add(192), op.add(144), vlut0, vlut1, cv40);
+            decode_block_checked(ip.add(192), op.add(144), vlut0, vlut1, cv40, &mut xv);
 
-            // Non-strict: only check the last block (CHECK0) plus
-            // accumulate block 0 in the same pattern as the C code.
-            // The C code does: CHECK1 on block 0, CHECK1 on block 1,
-            // CHECK1 on block 2, CHECK0 on block 3.
-            // With default CHECK0/CHECK1: only block 0 (CHECK1→nop when
-            // DN>128) and block 3 (CHECK0→active) are checked. But
-            // re-reading the C code more carefully:
-            // - When DN>128: CHECK1(block0) is active, CHECK1(block1) is
-            //   active, CHECK1(block2) is active, CHECK0(block3) is active.
-            // Wait — in the default (non-strict) build: CHECK0(x) = x,
-            // CHECK1(x) = nothing. So only CHECK0 fires. CHECK0 is on
-            // block3 (last block). Let's match that exactly.
-            xv = b64chk(e0, e1, e2, e3, xv);
-            // Also accumulate block 0 per the C pattern (CHECK1 when
-            // DN>128 is still a no-op in default mode, so skip it).
-            let _ = (d0, d1, d2, d3);
+            // Match Turbo-Base64's default CHECK0 schedule: in each 256-byte
+            // decode group only the last 64-byte block contributes to the
+            // validation accumulator.
 
             ip = ip.add(DN);
             op = op.add((DN / 4) * 3);
@@ -372,8 +381,7 @@ mod decode_engine {
         // scalar so the semantic last quantum (and any padding) is never
         // handled by the raw SIMD block decoder.
         while remaining(ip, in_end) > verify_model::DECODE_BLOCK_INPUT_BYTES {
-            let (d0, d1, d2, d3) = decode_block(ip, op, vlut0, vlut1, cv40);
-            xv = b64chk(d0, d1, d2, d3, xv);
+            decode_block_checked(ip, op, vlut0, vlut1, cv40, &mut xv);
             ip = ip.add(64);
             op = op.add(48);
         }
@@ -420,20 +428,16 @@ mod decode_engine {
 
         while remaining(ip, in_end) > DN {
             // Block 0 (ip + 0): validate
-            let (d0, d1, d2, d3) = decode_block(ip, op, vlut0, vlut1, cv40);
-            xv = b64chk(d0, d1, d2, d3, xv);
+            decode_block_checked(ip, op, vlut0, vlut1, cv40, &mut xv);
 
             // Block 1 (ip + 64): validate
-            let (d0, d1, d2, d3) = decode_block(ip.add(64), op.add(48), vlut0, vlut1, cv40);
-            xv = b64chk(d0, d1, d2, d3, xv);
+            decode_block_checked(ip.add(64), op.add(48), vlut0, vlut1, cv40, &mut xv);
 
             // Block 2 (ip + 128): validate
-            let (d0, d1, d2, d3) = decode_block(ip.add(128), op.add(96), vlut0, vlut1, cv40);
-            xv = b64chk(d0, d1, d2, d3, xv);
+            decode_block_checked(ip.add(128), op.add(96), vlut0, vlut1, cv40, &mut xv);
 
             // Block 3 (ip + 192): validate
-            let (d0, d1, d2, d3) = decode_block(ip.add(192), op.add(144), vlut0, vlut1, cv40);
-            xv = b64chk(d0, d1, d2, d3, xv);
+            decode_block_checked(ip.add(192), op.add(144), vlut0, vlut1, cv40, &mut xv);
 
             ip = ip.add(DN);
             op = op.add((DN / 4) * 3);
@@ -443,8 +447,7 @@ mod decode_engine {
         // scalar so the semantic last quantum (and any padding) is never
         // handled by the raw SIMD block decoder.
         while remaining(ip, in_end) > verify_model::DECODE_BLOCK_INPUT_BYTES {
-            let (d0, d1, d2, d3) = decode_block(ip, op, vlut0, vlut1, cv40);
-            xv = b64chk(d0, d1, d2, d3, xv);
+            decode_block_checked(ip, op, vlut0, vlut1, cv40, &mut xv);
             ip = ip.add(64);
             op = op.add(48);
         }
@@ -471,7 +474,7 @@ mod decode_engine {
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 pub unsafe fn decode_neon_kernel_strict(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
-    decode_engine::decode_neon_strict(input, out)
+    unsafe { decode_engine::decode_neon_strict(input, out) }
 }
 
 /// NEON non-strict (CHECK0) decode kernel.
@@ -481,7 +484,7 @@ pub unsafe fn decode_neon_kernel_strict(input: &[u8], out: &mut [u8]) -> Option<
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 pub unsafe fn decode_neon_kernel_partial(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
-    decode_engine::decode_neon(input, out)
+    unsafe { decode_engine::decode_neon(input, out) }
 }
 
 /// NEON encode kernel.  Returns `(consumed_input, written_output)`.
@@ -491,7 +494,7 @@ pub unsafe fn decode_neon_kernel_partial(input: &[u8], out: &mut [u8]) -> Option
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 pub unsafe fn encode_neon_kernel(input: &[u8], out: &mut [u8]) -> (usize, usize) {
-    encode_engine::encode_base64_neon(input, out)
+    unsafe { encode_engine::encode_base64_neon(input, out) }
 }
 
 // ---------------------------------------------------------------------------
