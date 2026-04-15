@@ -5,7 +5,7 @@
 //! processed in parallel per `__m256i` register.
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{b2i, w2i, Base64Decoder, DecodeOpts};
+use super::{Base64Decoder, DecodeOpts, b2i, w2i};
 use crate::engine::common::{assert_encode_capacity, prepare_decode_output, remaining};
 use crate::engine::models::avx2 as verify_model;
 
@@ -51,11 +51,7 @@ pub(crate) fn decoded_len_unchecked(b64: &[u8]) -> Option<usize> {
         return None;
     }
     let pad = if b64[n - 1] == b'=' {
-        if b64[n - 2] == b'=' {
-            2
-        } else {
-            1
-        }
+        if b64[n - 2] == b'=' { 2 } else { 1 }
     } else {
         0
     };
