@@ -79,6 +79,28 @@ fn compile_one_object(
     run_checked(cmd);
 }
 
+/// Resolve the C compiler to use, in priority order:
+///   CC_<target_upper> → TARGET_CC → CC → "cc"
+/// where <target_upper> is the TARGET env var with `-` and `.` replaced by `_`,
+/// uppercased (e.g. `CC_AARCH64_UNKNOWN_LINUX_GNU`).
+fn resolve_cc() -> String {
+    let target = env::var("TARGET").unwrap_or_default();
+    let target_key = target.replace(['-', '.'], "_").to_uppercase();
+    let cc_target_var = format!("CC_{target_key}");
+    println!("cargo:rerun-if-env-changed={cc_target_var}");
+    println!("cargo:rerun-if-env-changed=TARGET_CC");
+    println!("cargo:rerun-if-env-changed=CC");
+    env::var(&cc_target_var)
+        .or_else(|_| env::var("TARGET_CC"))
+        .or_else(|_| env::var("CC"))
+        .unwrap_or_else(|_| "cc".to_string())
+}
+
+fn resolve_ar() -> String {
+    println!("cargo:rerun-if-env-changed=AR");
+    env::var("AR").unwrap_or_else(|_| "ar".to_string())
+}
+
 fn compile_mode_variants(
     turbo_dir: &Path,
     target_arch: &str,
@@ -88,8 +110,8 @@ fn compile_mode_variants(
     lib_name: &str,
 ) {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is not set"));
-    let cc = env::var("CC").unwrap_or_else(|_| "cc".to_string());
-    let ar = env::var("AR").unwrap_or_else(|_| "ar".to_string());
+    let cc = resolve_cc();
+    let ar = resolve_ar();
 
     let simd_sources: &[&str] = match target_arch {
         "x86" | "x86_64" => &["turbob64v128.c", "turbob64v256.c", "turbob64v512.c"],
@@ -239,13 +261,18 @@ fn compile_b64check_variants(turbo_dir: &Path, target_arch: &str) {
     );
 }
 
+/// Build the base Turbo-Base64 library (default CHECK0 mode, no suffix) in OUT_DIR.
+fn compile_base_variants(turbo_dir: &Path, target_arch: &str) {
+    compile_mode_variants(turbo_dir, target_arch, &[], &[], "", "tb64");
+}
+
 fn compile_lemire_fastbase64(manifest_dir: &str) {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is not set"));
     let fastbase64_dir = Path::new(manifest_dir).join("fastbase64");
     let include_dir = fastbase64_dir.join("include");
     let src_dir = fastbase64_dir.join("src");
-    let cc = env::var("CC").unwrap_or_else(|_| "cc".to_string());
-    let ar = env::var("AR").unwrap_or_else(|_| "ar".to_string());
+    let cc = resolve_cc();
+    let ar = resolve_ar();
 
     if !fastbase64_dir.exists() {
         println!(
@@ -327,11 +354,6 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_C_BENCHMARKS");
 
-    println!(
-        "cargo:rerun-if-changed={}",
-        turbo_dir.join("libtb64.a").display()
-    );
-
     if !c_benchmarks_enabled {
         return;
     }
@@ -346,14 +368,12 @@ fn main() {
         return;
     }
 
-    // Primary C baseline library is built externally via `make` (see Justfile).
-    println!("cargo:rustc-link-search=native={}", turbo_dir.display());
-    println!("cargo:rustc-link-lib=static=tb64");
-
-    // Build a second copy with NB64CHECK enabled and symbol suffixes so both
-    // versions can coexist in the same benchmark binary.
+    // Build all three variants of the Turbo-Base64 C library directly in OUT_DIR.
+    // This replaces the old approach of linking a precompiled Turbo-Base64/libtb64.a,
+    // which was architecture-specific and would fail when cross-compiling or building
+    // on a different host (e.g. aarch64 host with an x86_64 .a).
+    compile_base_variants(&turbo_dir, &target_arch);
     compile_nb64check_variants(&turbo_dir, &target_arch);
-    // Build a third copy with B64CHECK enabled (full checks) for strict apples-to-apples.
     compile_b64check_variants(&turbo_dir, &target_arch);
     // Build Lemire fastbase64 AVX2 + chromium fallback only on x86/x86_64.
     if matches!(target_arch.as_str(), "x86" | "x86_64") {

@@ -23,6 +23,7 @@ include = [
 [features]
 default = []
 c-benchmarks = []
+perf-tools = []
 
 [dev-dependencies]
 
@@ -39,7 +40,7 @@ name = "perf_compare"
 path = "src/bin/perf_compare.rs"
 test = false
 bench = false
-required-features = ["c-benchmarks"]
+required-features = ["c-benchmarks", "perf-tools"]
 
 [[bin]]
 name = "miri_smoke"

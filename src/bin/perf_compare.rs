@@ -1,19 +1,51 @@
+// perf_compare: micro-benchmark harness for comparing oxid64 vs Turbo-Base64 C.
+//
+// Build requires features: c-benchmarks + perf-tools
+// The binary is architecture-aware: x86/x86_64 exposes SSSE3/AVX2/AVX-512 modes,
+// aarch64 exposes NEON modes.  All ISA-specific code is gated with #[cfg].
+
+// ---------------------------------------------------------------------------
+// x86 / x86_64 imports
+// ---------------------------------------------------------------------------
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use oxid64::engine::avx2::{
-    Avx2Decoder, decode_avx2_kernel_partial, decode_avx2_kernel_strict,
-    decode_avx2_kernel_unchecked, encode_avx2_kernel,
+    decode_avx2_kernel_partial, decode_avx2_kernel_strict, decode_avx2_kernel_unchecked,
+    encode_avx2_kernel, Avx2Decoder,
 };
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use oxid64::engine::avx512vbmi::{
-    Avx512VbmiDecoder, decode_avx512_kernel_partial, decode_avx512_kernel_strict,
-    encode_avx512_kernel,
+    decode_avx512_kernel_partial, decode_avx512_kernel_strict, encode_avx512_kernel,
+    Avx512VbmiDecoder,
 };
-use oxid64::engine::scalar::encode_base64_fast;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use oxid64::engine::ssse3::{
-    Ssse3Decoder, decode_ssse3_kernel_partial, decode_ssse3_kernel_strict, encode_ssse3_kernel,
+    decode_ssse3_kernel_partial, decode_ssse3_kernel_strict, encode_ssse3_kernel, Ssse3Decoder,
 };
+
+// ---------------------------------------------------------------------------
+// aarch64 imports
+// ---------------------------------------------------------------------------
+
+#[cfg(target_arch = "aarch64")]
+use oxid64::engine::neon::{
+    decode_neon_kernel_partial, decode_neon_kernel_strict, encode_neon_kernel, NeonDecoder,
+};
+
+// ---------------------------------------------------------------------------
+// Common imports
+// ---------------------------------------------------------------------------
+
+use oxid64::engine::scalar::encode_base64_fast;
 use oxid64::engine::{Base64Decoder, DecodeOpts};
 use std::hint::black_box;
 use std::process::ExitCode;
 
+// ---------------------------------------------------------------------------
+// Mode lists — one per target architecture
+// ---------------------------------------------------------------------------
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const MODES: &[&str] = &[
     "oxid64-ssse3-strict-api",
     "oxid64-ssse3-strict-kernel",
@@ -50,9 +82,35 @@ const MODES: &[&str] = &[
     "tb64-avx512-encode",
 ];
 
+#[cfg(target_arch = "aarch64")]
+const MODES: &[&str] = &[
+    "oxid64-neon-strict-api",
+    "oxid64-neon-strict-kernel",
+    "oxid64-neon-nonstrict-api",
+    "oxid64-neon-nonstrict-kernel",
+    "tb64-neon-check",
+    "tb64-neon-partial",
+    "tb64-neon-unchecked",
+    "oxid64-neon-encode-api",
+    "oxid64-neon-encode-kernel",
+    "tb64-neon-encode",
+];
+
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+const MODES: &[&str] = &[];
+
+// ---------------------------------------------------------------------------
+// Kernel type aliases
+// ---------------------------------------------------------------------------
+
 type DecodeKernel = unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>;
 type EncodeKernel = unsafe fn(&[u8], &mut [u8]) -> (usize, usize);
 
+// ---------------------------------------------------------------------------
+// FFI: x86 / x86_64
+// ---------------------------------------------------------------------------
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe extern "C" {
     fn tb64v128dec_b64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64v256dec_b64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
@@ -74,35 +132,76 @@ unsafe extern "C" {
     fn fast_avx2_base64_encode(dest: *mut i8, str_: *const i8, len: usize) -> usize;
 }
 
+// ---------------------------------------------------------------------------
+// FFI: aarch64
+// ---------------------------------------------------------------------------
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" {
+    fn tb64v128dec_b64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+    fn tb64v128dec(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+    fn tb64v128dec_nb64check(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+    fn tb64v128enc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
+}
+
+// ---------------------------------------------------------------------------
+// CPU feature detection
+// ---------------------------------------------------------------------------
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn has_ssse3() -> bool {
     std::arch::is_x86_feature_detected!("ssse3")
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn has_avx2() -> bool {
     std::arch::is_x86_feature_detected!("avx2")
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn has_avx512vbmi() -> bool {
     std::arch::is_x86_feature_detected!("avx512f")
         && std::arch::is_x86_feature_detected!("avx512bw")
         && std::arch::is_x86_feature_detected!("avx512vbmi")
 }
 
+#[cfg(target_arch = "aarch64")]
+fn has_neon() -> bool {
+    std::arch::is_aarch64_feature_detected!("neon")
+}
+
 fn mode_supported(mode: &str) -> bool {
-    match mode {
-        mode if mode.starts_with("oxid64-ssse3") || mode.starts_with("tb64-ssse3") => has_ssse3(),
-        mode if mode.starts_with("oxid64-avx2")
-            || mode.starts_with("tb64-avx2")
-            || mode.starts_with("fastbase64-avx2") =>
-        {
-            has_avx2()
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        match mode {
+            m if m.starts_with("oxid64-ssse3") || m.starts_with("tb64-ssse3") => has_ssse3(),
+            m if m.starts_with("oxid64-avx2")
+                || m.starts_with("tb64-avx2")
+                || m.starts_with("fastbase64-avx2") =>
+            {
+                has_avx2()
+            }
+            m if m.starts_with("oxid64-avx512") || m.starts_with("tb64-avx512") => has_avx512vbmi(),
+            _ => false,
         }
-        mode if mode.starts_with("oxid64-avx512") || mode.starts_with("tb64-avx512") => {
-            has_avx512vbmi()
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        match mode {
+            m if m.starts_with("oxid64-neon") || m.starts_with("tb64-neon") => has_neon(),
+            _ => false,
         }
-        _ => false,
+    }
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = mode;
+        false
     }
 }
+
+// ---------------------------------------------------------------------------
+// Harness helpers
+// ---------------------------------------------------------------------------
 
 fn usage() {
     eprintln!("Usage: perf_compare <mode> <size> <iters>");
@@ -225,6 +324,11 @@ fn run_c_encode(
     acc
 }
 
+// ---------------------------------------------------------------------------
+// x86-only helpers (fastbase64)
+// ---------------------------------------------------------------------------
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn run_fast_decode(encoded: &[u8], out: &mut [u8], iters: usize) -> u64 {
     let mut acc = 0u64;
     for _ in 0..iters {
@@ -240,6 +344,7 @@ fn run_fast_decode(encoded: &[u8], out: &mut [u8], iters: usize) -> u64 {
     acc
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn run_fast_encode(raw: &[u8], out: &mut [u8], iters: usize) -> u64 {
     let mut acc = 0u64;
     for _ in 0..iters {
@@ -254,6 +359,10 @@ fn run_fast_encode(raw: &[u8], out: &mut [u8], iters: usize) -> u64 {
     }
     acc
 }
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
@@ -296,115 +405,14 @@ fn main() -> ExitCode {
             let mut decode_out = vec![0u8; raw.len() + 64];
             let mut encode_out = vec![0u8; raw.len().div_ceil(3) * 4 + 64];
 
-            let acc = match mode.as_str() {
-                "oxid64-ssse3-strict-api" => {
-                    let dec = Ssse3Decoder::new();
-                    run_decode_api(&dec, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-ssse3-strict-kernel" => {
-                    run_decode_kernel(decode_ssse3_kernel_strict, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-ssse3-nonstrict-api" => {
-                    let dec = Ssse3Decoder::with_opts(DecodeOpts { strict: false });
-                    run_decode_api(&dec, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-ssse3-nonstrict-kernel" => run_decode_kernel(
-                    decode_ssse3_kernel_partial,
-                    &encoded,
-                    &mut decode_out,
-                    iters,
-                ),
-                "tb64-ssse3-check" => {
-                    run_c_decode(tb64v128dec_b64check, &encoded, &mut decode_out, iters)
-                }
-                "tb64-ssse3-partial" => run_c_decode(tb64v128dec, &encoded, &mut decode_out, iters),
-                "tb64-ssse3-unchecked" => {
-                    run_c_decode(tb64v128dec_nb64check, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-avx2-strict-api" => {
-                    let dec = Avx2Decoder::new();
-                    run_decode_api(&dec, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-avx2-strict-kernel" => {
-                    run_decode_kernel(decode_avx2_kernel_strict, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-avx2-nonstrict-api" => {
-                    let dec = Avx2Decoder::with_opts(DecodeOpts { strict: false });
-                    run_decode_api(&dec, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-avx2-nonstrict-kernel" => {
-                    run_decode_kernel(decode_avx2_kernel_partial, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-avx2-unchecked-kernel" => run_decode_kernel(
-                    decode_avx2_kernel_unchecked,
-                    &encoded,
-                    &mut decode_out,
-                    iters,
-                ),
-                "tb64-avx2-check" => {
-                    run_c_decode(tb64v256dec_b64check, &encoded, &mut decode_out, iters)
-                }
-                "tb64-avx2-partial" => run_c_decode(tb64v256dec, &encoded, &mut decode_out, iters),
-                "tb64-avx2-unchecked" => {
-                    run_c_decode(tb64v256dec_nb64check, &encoded, &mut decode_out, iters)
-                }
-                "fastbase64-avx2-check" => run_fast_decode(&encoded, &mut decode_out, iters),
-                "oxid64-avx512-strict-api" => {
-                    let dec = Avx512VbmiDecoder::new();
-                    run_decode_api(&dec, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-avx512-strict-kernel" => run_decode_kernel(
-                    decode_avx512_kernel_strict,
-                    &encoded,
-                    &mut decode_out,
-                    iters,
-                ),
-                "oxid64-avx512-nonstrict-api" => {
-                    let dec = Avx512VbmiDecoder::with_opts(DecodeOpts { strict: false });
-                    run_decode_api(&dec, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-avx512-nonstrict-kernel" => run_decode_kernel(
-                    decode_avx512_kernel_partial,
-                    &encoded,
-                    &mut decode_out,
-                    iters,
-                ),
-                "tb64-avx512-check" => {
-                    run_c_decode(tb64v512dec_b64check, &encoded, &mut decode_out, iters)
-                }
-                "tb64-avx512-partial" => {
-                    run_c_decode(tb64v512dec, &encoded, &mut decode_out, iters)
-                }
-                "tb64-avx512-unchecked" => {
-                    run_c_decode(tb64v512dec_nb64check, &encoded, &mut decode_out, iters)
-                }
-                "oxid64-ssse3-encode-api" => {
-                    let enc = Ssse3Decoder::new();
-                    run_encode_api(&enc, &raw, &mut encode_out, iters)
-                }
-                "oxid64-ssse3-encode-kernel" => {
-                    run_encode_kernel(encode_ssse3_kernel, &raw, &mut encode_out, iters)
-                }
-                "tb64-ssse3-encode" => run_c_encode(tb64v128enc, &raw, &mut encode_out, iters),
-                "oxid64-avx2-encode-api" => {
-                    let enc = Avx2Decoder::new();
-                    run_encode_api(&enc, &raw, &mut encode_out, iters)
-                }
-                "oxid64-avx2-encode-kernel" => {
-                    run_encode_kernel(encode_avx2_kernel, &raw, &mut encode_out, iters)
-                }
-                "tb64-avx2-encode" => run_c_encode(tb64v256enc, &raw, &mut encode_out, iters),
-                "fastbase64-avx2-encode" => run_fast_encode(&raw, &mut encode_out, iters),
-                "oxid64-avx512-encode-api" => {
-                    let enc = Avx512VbmiDecoder::new();
-                    run_encode_api(&enc, &raw, &mut encode_out, iters)
-                }
-                "oxid64-avx512-encode-kernel" => {
-                    run_encode_kernel(encode_avx512_kernel, &raw, &mut encode_out, iters)
-                }
-                "tb64-avx512-encode" => run_c_encode(tb64v512enc, &raw, &mut encode_out, iters),
-                _ => unreachable!(),
-            };
+            let acc = dispatch(
+                mode,
+                &raw,
+                &encoded,
+                &mut decode_out,
+                &mut encode_out,
+                iters,
+            );
 
             println!("{acc}");
             ExitCode::SUCCESS
@@ -414,4 +422,162 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch — x86 / x86_64
+// ---------------------------------------------------------------------------
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn dispatch(
+    mode: &str,
+    raw: &[u8],
+    encoded: &[u8],
+    decode_out: &mut [u8],
+    encode_out: &mut [u8],
+    iters: usize,
+) -> u64 {
+    match mode {
+        "oxid64-ssse3-strict-api" => {
+            let dec = Ssse3Decoder::new();
+            run_decode_api(&dec, encoded, decode_out, iters)
+        }
+        "oxid64-ssse3-strict-kernel" => {
+            run_decode_kernel(decode_ssse3_kernel_strict, encoded, decode_out, iters)
+        }
+        "oxid64-ssse3-nonstrict-api" => {
+            let dec = Ssse3Decoder::with_opts(DecodeOpts { strict: false });
+            run_decode_api(&dec, encoded, decode_out, iters)
+        }
+        "oxid64-ssse3-nonstrict-kernel" => {
+            run_decode_kernel(decode_ssse3_kernel_partial, encoded, decode_out, iters)
+        }
+        "tb64-ssse3-check" => run_c_decode(tb64v128dec_b64check, encoded, decode_out, iters),
+        "tb64-ssse3-partial" => run_c_decode(tb64v128dec, encoded, decode_out, iters),
+        "tb64-ssse3-unchecked" => run_c_decode(tb64v128dec_nb64check, encoded, decode_out, iters),
+        "oxid64-avx2-strict-api" => {
+            let dec = Avx2Decoder::new();
+            run_decode_api(&dec, encoded, decode_out, iters)
+        }
+        "oxid64-avx2-strict-kernel" => {
+            run_decode_kernel(decode_avx2_kernel_strict, encoded, decode_out, iters)
+        }
+        "oxid64-avx2-nonstrict-api" => {
+            let dec = Avx2Decoder::with_opts(DecodeOpts { strict: false });
+            run_decode_api(&dec, encoded, decode_out, iters)
+        }
+        "oxid64-avx2-nonstrict-kernel" => {
+            run_decode_kernel(decode_avx2_kernel_partial, encoded, decode_out, iters)
+        }
+        "oxid64-avx2-unchecked-kernel" => {
+            run_decode_kernel(decode_avx2_kernel_unchecked, encoded, decode_out, iters)
+        }
+        "tb64-avx2-check" => run_c_decode(tb64v256dec_b64check, encoded, decode_out, iters),
+        "tb64-avx2-partial" => run_c_decode(tb64v256dec, encoded, decode_out, iters),
+        "tb64-avx2-unchecked" => run_c_decode(tb64v256dec_nb64check, encoded, decode_out, iters),
+        "fastbase64-avx2-check" => run_fast_decode(encoded, decode_out, iters),
+        "oxid64-avx512-strict-api" => {
+            let dec = Avx512VbmiDecoder::new();
+            run_decode_api(&dec, encoded, decode_out, iters)
+        }
+        "oxid64-avx512-strict-kernel" => {
+            run_decode_kernel(decode_avx512_kernel_strict, encoded, decode_out, iters)
+        }
+        "oxid64-avx512-nonstrict-api" => {
+            let dec = Avx512VbmiDecoder::with_opts(DecodeOpts { strict: false });
+            run_decode_api(&dec, encoded, decode_out, iters)
+        }
+        "oxid64-avx512-nonstrict-kernel" => {
+            run_decode_kernel(decode_avx512_kernel_partial, encoded, decode_out, iters)
+        }
+        "tb64-avx512-check" => run_c_decode(tb64v512dec_b64check, encoded, decode_out, iters),
+        "tb64-avx512-partial" => run_c_decode(tb64v512dec, encoded, decode_out, iters),
+        "tb64-avx512-unchecked" => run_c_decode(tb64v512dec_nb64check, encoded, decode_out, iters),
+        "oxid64-ssse3-encode-api" => {
+            let enc = Ssse3Decoder::new();
+            run_encode_api(&enc, raw, encode_out, iters)
+        }
+        "oxid64-ssse3-encode-kernel" => {
+            run_encode_kernel(encode_ssse3_kernel, raw, encode_out, iters)
+        }
+        "tb64-ssse3-encode" => run_c_encode(tb64v128enc, raw, encode_out, iters),
+        "oxid64-avx2-encode-api" => {
+            let enc = Avx2Decoder::new();
+            run_encode_api(&enc, raw, encode_out, iters)
+        }
+        "oxid64-avx2-encode-kernel" => {
+            run_encode_kernel(encode_avx2_kernel, raw, encode_out, iters)
+        }
+        "tb64-avx2-encode" => run_c_encode(tb64v256enc, raw, encode_out, iters),
+        "fastbase64-avx2-encode" => run_fast_encode(raw, encode_out, iters),
+        "oxid64-avx512-encode-api" => {
+            let enc = Avx512VbmiDecoder::new();
+            run_encode_api(&enc, raw, encode_out, iters)
+        }
+        "oxid64-avx512-encode-kernel" => {
+            run_encode_kernel(encode_avx512_kernel, raw, encode_out, iters)
+        }
+        "tb64-avx512-encode" => run_c_encode(tb64v512enc, raw, encode_out, iters),
+        _ => unreachable!(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch — aarch64
+// ---------------------------------------------------------------------------
+
+#[cfg(target_arch = "aarch64")]
+fn dispatch(
+    mode: &str,
+    raw: &[u8],
+    encoded: &[u8],
+    decode_out: &mut [u8],
+    encode_out: &mut [u8],
+    iters: usize,
+) -> u64 {
+    match mode {
+        "oxid64-neon-strict-api" => {
+            let dec = NeonDecoder::new();
+            run_decode_api(&dec, encoded, decode_out, iters)
+        }
+        "oxid64-neon-strict-kernel" => {
+            run_decode_kernel(decode_neon_kernel_strict, encoded, decode_out, iters)
+        }
+        "oxid64-neon-nonstrict-api" => {
+            let dec = NeonDecoder::with_opts(DecodeOpts { strict: false });
+            run_decode_api(&dec, encoded, decode_out, iters)
+        }
+        "oxid64-neon-nonstrict-kernel" => {
+            run_decode_kernel(decode_neon_kernel_partial, encoded, decode_out, iters)
+        }
+        "tb64-neon-check" => run_c_decode(tb64v128dec_b64check, encoded, decode_out, iters),
+        "tb64-neon-partial" => run_c_decode(tb64v128dec, encoded, decode_out, iters),
+        "tb64-neon-unchecked" => run_c_decode(tb64v128dec_nb64check, encoded, decode_out, iters),
+        "oxid64-neon-encode-api" => {
+            let enc = NeonDecoder::new();
+            run_encode_api(&enc, raw, encode_out, iters)
+        }
+        "oxid64-neon-encode-kernel" => {
+            run_encode_kernel(encode_neon_kernel, raw, encode_out, iters)
+        }
+        "tb64-neon-encode" => run_c_encode(tb64v128enc, raw, encode_out, iters),
+        _ => unreachable!(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch — fallback (unsupported arch)
+// ---------------------------------------------------------------------------
+
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+fn dispatch(
+    _mode: &str,
+    _raw: &[u8],
+    _encoded: &[u8],
+    _decode_out: &mut [u8],
+    _encode_out: &mut [u8],
+    _iters: usize,
+) -> u64 {
+    eprintln!("perf_compare: no modes available on this architecture");
+    0
 }

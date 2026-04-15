@@ -459,6 +459,42 @@ mod decode_engine {
 }
 
 // ---------------------------------------------------------------------------
+// Public kernel re-exports (for perf_compare and external benchmarks)
+// ---------------------------------------------------------------------------
+
+/// NEON strict-mode decode kernel.  Processes as many full 64-byte input
+/// blocks as possible and returns `(consumed, written)`, or `None` on invalid
+/// input.  The caller is responsible for scalar tail handling.
+///
+/// # Safety
+/// The `neon` CPU feature must be available on the executing core.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn decode_neon_kernel_strict(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
+    decode_engine::decode_neon_strict(input, out)
+}
+
+/// NEON non-strict (CHECK0) decode kernel.
+///
+/// # Safety
+/// The `neon` CPU feature must be available on the executing core.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn decode_neon_kernel_partial(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
+    decode_engine::decode_neon(input, out)
+}
+
+/// NEON encode kernel.  Returns `(consumed_input, written_output)`.
+///
+/// # Safety
+/// The `neon` CPU feature must be available on the executing core.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn encode_neon_kernel(input: &[u8], out: &mut [u8]) -> (usize, usize) {
+    encode_engine::encode_base64_neon(input, out)
+}
+
+// ---------------------------------------------------------------------------
 // Encode engine — all functions require `target_feature(enable = "neon")`
 // ---------------------------------------------------------------------------
 #[allow(unsafe_op_in_unsafe_fn)]
