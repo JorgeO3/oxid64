@@ -3,6 +3,7 @@ name = "oxid64"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.89"
+autobins = false
 description = "High-performance Base64 codec with SIMD acceleration (SSSE3, AVX2, AVX-512 VBMI, NEON, WASM SIMD128)"
 license = "MIT"
 repository = "https://github.com/jorgeolvr/oxid64"
@@ -19,6 +20,10 @@ include = [
 
 [dependencies]
 
+[features]
+default = []
+c-benchmarks = []
+
 [dev-dependencies]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
@@ -28,6 +33,14 @@ proptest = "1.11.0"
 [[bench]]
 name = "base64_bench"
 harness = false
+required-features = ["c-benchmarks"]
+
+[[bin]]
+name = "perf_compare"
+path = "src/bin/perf_compare.rs"
+test = false
+bench = false
+required-features = ["c-benchmarks"]
 
 [[bin]]
 name = "miri_smoke"

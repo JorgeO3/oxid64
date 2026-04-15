@@ -289,14 +289,27 @@ fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let turbo_dir = Path::new(&manifest_dir).join("Turbo-Base64");
     let target = env::var("TARGET").expect("TARGET is not set");
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let c_benchmarks_enabled = env::var_os("CARGO_FEATURE_C_BENCHMARKS").is_some();
+
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_C_BENCHMARKS");
 
     println!(
         "cargo:rerun-if-changed={}",
         turbo_dir.join("libtb64.a").display()
     );
 
+    if !c_benchmarks_enabled {
+        return;
+    }
+
     if target.starts_with("wasm32") {
         println!("cargo:warning=skipping native C benchmark libraries for target {target}");
+        return;
+    }
+
+    if !matches!(target_arch.as_str(), "x86" | "x86_64") {
+        println!("cargo:warning=skipping C benchmark libraries for non-x86 target {target}");
         return;
     }
 
