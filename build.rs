@@ -81,6 +81,7 @@ fn compile_one_object(
 
 fn compile_mode_variants(
     turbo_dir: &Path,
+    target_arch: &str,
     mode_flags: &[&str],
     d_extra_flags: &[&str],
     symbol_suffix: &str,
@@ -90,13 +91,16 @@ fn compile_mode_variants(
     let cc = env::var("CC").unwrap_or_else(|_| "cc".to_string());
     let ar = env::var("AR").unwrap_or_else(|_| "ar".to_string());
 
-    for src in [
-        "turbob64c.c",
-        "turbob64d.c",
-        "turbob64v128.c",
-        "turbob64v256.c",
-        "turbob64v512.c",
-    ] {
+    let simd_sources: &[&str] = match target_arch {
+        "x86" | "x86_64" => &["turbob64v128.c", "turbob64v256.c", "turbob64v512.c"],
+        "aarch64" => &["turbob64v128.c"],
+        _ => &[],
+    };
+
+    for src in ["turbob64c.c", "turbob64d.c"] {
+        println!("cargo:rerun-if-changed={}", turbo_dir.join(src).display());
+    }
+    for src in simd_sources {
         println!("cargo:rerun-if-changed={}", turbo_dir.join(src).display());
     }
 
@@ -113,6 +117,8 @@ fn compile_mode_variants(
     let obj_v256 = out_dir.join(format!("turbob64v256_{suffix_tag}.o"));
     let obj_v512 = out_dir.join(format!("turbob64v512_{suffix_tag}.o"));
 
+    let mut objects = Vec::with_capacity(6);
+
     compile_one_object(
         &cc,
         turbo_dir,
@@ -122,6 +128,7 @@ fn compile_mode_variants(
         mode_flags,
         &define_flags,
     );
+    objects.push(obj_core_c.clone());
     compile_one_object(
         &cc,
         turbo_dir,
@@ -131,54 +138,78 @@ fn compile_mode_variants(
         mode_flags,
         &define_flags,
     );
-    compile_one_object(
-        &cc,
-        turbo_dir,
-        "turbob64v128.c",
-        &obj_v128,
-        &["-mssse3"],
-        mode_flags,
-        &define_flags,
-    );
-    compile_one_object(
-        &cc,
-        turbo_dir,
-        "turbob64v128.c",
-        &obj_v128a,
-        &["-march=corei7-avx", "-mtune=corei7-avx", "-mno-aes"],
-        mode_flags,
-        &define_flags,
-    );
-    compile_one_object(
-        &cc,
-        turbo_dir,
-        "turbob64v256.c",
-        &obj_v256,
-        &["-march=haswell"],
-        mode_flags,
-        &define_flags,
-    );
-    compile_one_object(
-        &cc,
-        turbo_dir,
-        "turbob64v512.c",
-        &obj_v512,
-        &["-march=skylake-avx512", "-mavx512vbmi"],
-        mode_flags,
-        &define_flags,
-    );
+    objects.push(obj_core_d.clone());
+
+    match target_arch {
+        "x86" | "x86_64" => {
+            compile_one_object(
+                &cc,
+                turbo_dir,
+                "turbob64v128.c",
+                &obj_v128,
+                &["-mssse3"],
+                mode_flags,
+                &define_flags,
+            );
+            objects.push(obj_v128.clone());
+
+            compile_one_object(
+                &cc,
+                turbo_dir,
+                "turbob64v128.c",
+                &obj_v128a,
+                &["-march=corei7-avx", "-mtune=corei7-avx", "-mno-aes"],
+                mode_flags,
+                &define_flags,
+            );
+            objects.push(obj_v128a.clone());
+
+            compile_one_object(
+                &cc,
+                turbo_dir,
+                "turbob64v256.c",
+                &obj_v256,
+                &["-march=haswell"],
+                mode_flags,
+                &define_flags,
+            );
+            objects.push(obj_v256.clone());
+
+            compile_one_object(
+                &cc,
+                turbo_dir,
+                "turbob64v512.c",
+                &obj_v512,
+                &["-march=skylake-avx512", "-mavx512vbmi"],
+                mode_flags,
+                &define_flags,
+            );
+            objects.push(obj_v512.clone());
+        }
+        "aarch64" => {
+            compile_one_object(
+                &cc,
+                turbo_dir,
+                "turbob64v128.c",
+                &obj_v128,
+                &["-march=armv8-a"],
+                mode_flags,
+                &define_flags,
+            );
+            objects.push(obj_v128.clone());
+        }
+        _ => {
+            panic!("unsupported target arch for Turbo-Base64 variants: {target_arch}");
+        }
+    }
 
     let lib_path = out_dir.join(format!("lib{lib_name}.a"));
     run_checked({
         let mut cmd = Command::new(ar);
-        cmd.arg("crs")
-            .arg(&lib_path)
-            .arg(&obj_core_c)
-            .arg(&obj_core_d)
-            .arg(&obj_v128)
-            .arg(&obj_v128a)
-            .arg(&obj_v256)
-            .arg(&obj_v512);
+        cmd.arg("crs").arg(&lib_path);
+        for obj in &objects {
+            cmd.arg(obj);
+        }
         cmd
     });
 
@@ -186,9 +217,10 @@ fn compile_mode_variants(
     println!("cargo:rustc-link-lib=static={lib_name}");
 }
 
-fn compile_nb64check_variants(turbo_dir: &Path) {
+fn compile_nb64check_variants(turbo_dir: &Path, target_arch: &str) {
     compile_mode_variants(
         turbo_dir,
+        target_arch,
         &["-DNB64CHECK=1"],
         &["-UNB64CHECK"],
         "_nb64check",
@@ -196,9 +228,10 @@ fn compile_nb64check_variants(turbo_dir: &Path) {
     );
 }
 
-fn compile_b64check_variants(turbo_dir: &Path) {
+fn compile_b64check_variants(turbo_dir: &Path, target_arch: &str) {
     compile_mode_variants(
         turbo_dir,
+        target_arch,
         &["-DB64CHECK=1"],
         &[],
         "_b64check",
@@ -308,8 +341,8 @@ fn main() {
         return;
     }
 
-    if !matches!(target_arch.as_str(), "x86" | "x86_64") {
-        println!("cargo:warning=skipping C benchmark libraries for non-x86 target {target}");
+    if !matches!(target_arch.as_str(), "x86" | "x86_64" | "aarch64") {
+        println!("cargo:warning=skipping C benchmark libraries for unsupported target {target}");
         return;
     }
 
@@ -319,9 +352,11 @@ fn main() {
 
     // Build a second copy with NB64CHECK enabled and symbol suffixes so both
     // versions can coexist in the same benchmark binary.
-    compile_nb64check_variants(&turbo_dir);
+    compile_nb64check_variants(&turbo_dir, &target_arch);
     // Build a third copy with B64CHECK enabled (full checks) for strict apples-to-apples.
-    compile_b64check_variants(&turbo_dir);
-    // Build Lemire fastbase64 AVX2 + chromium fallback for benchmark comparisons.
-    compile_lemire_fastbase64(&manifest_dir);
+    compile_b64check_variants(&turbo_dir, &target_arch);
+    // Build Lemire fastbase64 AVX2 + chromium fallback only on x86/x86_64.
+    if matches!(target_arch.as_str(), "x86" | "x86_64") {
+        compile_lemire_fastbase64(&manifest_dir);
+    }
 }
