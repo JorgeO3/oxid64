@@ -5,7 +5,7 @@
 //! processed in parallel per `__m256i` register.
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{Base64Decoder, DecodeOpts, b2i, w2i};
+use super::{b2i, w2i, Base64Decoder, DecodeOpts};
 use crate::engine::common::{assert_encode_capacity, prepare_decode_output, remaining};
 use crate::engine::models::avx2 as verify_model;
 
@@ -51,7 +51,11 @@ pub(crate) fn decoded_len_unchecked(b64: &[u8]) -> Option<usize> {
         return None;
     }
     let pad = if b64[n - 1] == b'=' {
-        if b64[n - 2] == b'=' { 2 } else { 1 }
+        if b64[n - 2] == b'=' {
+            2
+        } else {
+            1
+        }
     } else {
         0
     };
@@ -468,7 +472,8 @@ mod decode_engine {
     ///
     /// 128 input bytes -> 96 output bytes. Direct port of the C `DS128(_i_)`
     /// macro with CHECK0 semantics: only the first vector of the first pair
-    /// is validated; the second pair is always validated.
+    /// is validated; the other three vectors in the block use CHECK1 and are
+    /// skipped in non-strict mode.
     ///
     /// `iu0`/`iu1` are forwarded: on entry they hold the current block's first
     /// pair; on exit they hold the next block's first pair.
