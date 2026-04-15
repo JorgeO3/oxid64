@@ -5,7 +5,9 @@ use std::hint::black_box;
 use std::sync::Once;
 
 #[cfg(target_arch = "aarch64")]
-use oxid64::engine::neon::NeonDecoder;
+use oxid64::engine::neon::{
+    NeonDecoder, decode_neon_kernel_partial, decode_neon_kernel_strict, encode_neon_kernel,
+};
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use oxid64::engine::avx2::Avx2Decoder;
@@ -244,6 +246,19 @@ pub fn bench_decode_checked(c: &mut Criterion) {
                         });
                     },
                 );
+
+                group.bench_with_input(
+                    BenchmarkId::new("oxid64 neon strict kernel", size),
+                    &encoded,
+                    |b, i| {
+                        b.iter(|| unsafe {
+                            let _ = decode_neon_kernel_strict(
+                                black_box(i.as_slice()),
+                                black_box(output.as_mut_slice()),
+                            );
+                        });
+                    },
+                );
             }
         }
 
@@ -454,6 +469,19 @@ pub fn bench_decode_unchecked(c: &mut Criterion) {
                         });
                     },
                 );
+
+                group.bench_with_input(
+                    BenchmarkId::new("oxid64 neon non-strict kernel", size),
+                    &encoded,
+                    |b, i| {
+                        b.iter(|| unsafe {
+                            let _ = decode_neon_kernel_partial(
+                                black_box(i.as_slice()),
+                                black_box(output.as_mut_slice()),
+                            );
+                        });
+                    },
+                );
             }
         }
 
@@ -654,6 +682,19 @@ pub fn bench_encode(c: &mut Criterion) {
                         );
                     });
                 });
+
+                group.bench_with_input(
+                    BenchmarkId::new("oxid64 neon kernel", size),
+                    &input,
+                    |b, i| {
+                        b.iter(|| unsafe {
+                            let _ = encode_neon_kernel(
+                                black_box(i.as_slice()),
+                                black_box(output.as_mut_slice()),
+                            );
+                        });
+                    },
+                );
             }
         }
 
