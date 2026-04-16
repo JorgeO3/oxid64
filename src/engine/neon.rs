@@ -1,44 +1,38 @@
-//! NEON Base64 codec — Turbo-Base64 port (AArch64).
+//! NEON Base64 codec — Turbo-Base64 port for AArch64.
 //!
-//! This module provides a high-performance NEON Base64 decoder and encoder
-//! ported from [Turbo-Base64](https://github.com/powturbo/Turbo-Base64).
+//! High-performance NEON Base64 decoder and encoder, ported from
+//! Turbo-Base64 (https://github.com/powturbo/Turbo-Base64).
 //!
-//! # Decoder
+//! Decoder modes (controlled by [`DecodeOpts`]):
 //!
-//! [`NeonDecoder`] supports two validation modes controlled by [`DecodeOpts`]:
+//! - **Non-strict** (`strict: false`): validates one of every four 64-byte
+//!   blocks per DN=256 iteration (Turbo-Base64's CHECK0 behavior).
+//! - **Strict** (`strict: true`, default): validates every processed block.
 //!
-//! - **Non-strict** (`strict: false`). Validates only one of every four
-//!   64-byte blocks per DN=256 iteration, matching the C library's default
-//!   `CHECK0`-only behaviour.
+//! Decoder algorithm overview:
 //!
-//! - **Strict** (`strict: true`, default). Validates all blocks per iteration.
+//! - Each 64-byte input chunk is loaded with `vld4q_u8`, which hardware
+//!   de-interleaves bytes into four 16-byte lanes (A, B, C, D) — the four
+//!   positions of a Base64 quad.
 //!
-//! # Decoder algorithm overview
+//! 1. **De-lookup**: A two-pass 128-byte table lookup converts ASCII bytes
+//!    to 6-bit values. The LUT is split into two 64-byte halves:
+//!    `vlut0` (0x00–0x3F) and `vlut1` (0x40–0x7F). For each lane:
+//!    - `vqtbl4q_u8(vlut1, byte ^ 0x40)` resolves indices 0x40–0x7F.
+//!    - `vqtbx4q_u8(upper, vlut0, byte)` resolves 0x00–0x3F, keeping the
+//!      upper result for out-of-range bytes. Invalid inputs map to `0xFF`.
 //!
-//! Each 64-byte input chunk is loaded with `vld4q_u8`, which hardware
-//! de-interleaves 64 bytes into four 16-byte lanes (A, B, C, D of each
-//! Base64 quad).
+//! 2. **Pack**: Shift and OR operations combine four 6-bit values into
+//!    three 8-bit output bytes; the result is written with `vst3q_u8`.
 //!
-//! 1. **De-lookup**: A two-pass 128-byte table lookup converts each ASCII
-//!    byte to its 6-bit value. The LUT is split into two 64-byte halves
-//!    (`vlut0` for indices 0–63, `vlut1` for indices 64–127). For each byte:
-//!    - `vqtbl4q_u8(vlut1, byte ^ 0x40)` resolves bytes 0x40–0x7F.
-//!    - `vqtbx4q_u8(result, vlut0, byte)` resolves bytes 0x00–0x3F,
-//!      keeping the vlut1 result for out-of-range indices.
-//!      Invalid bytes produce `0xFF` (bit 7 set).
+//! 3. **Check**: An OR-accumulator gathers any `0xFF` markers. After SIMD
+//!    processing, `vaddvq_u8(vshrq_n_u8(xv, 7))` detects any invalid byte.
 //!
-//! 2. **Pack**: Byte-wise shifts and ORs combine 4× 6-bit values into
-//!    3× 8-bit output bytes. The result is stored with `vst3q_u8`.
-//!
-//! 3. **Check**: An OR-accumulator collects any `0xFF` markers. After
-//!    all blocks, `vaddvq_u8(vshrq_n_u8(xv, 7))` detects if any byte
-//!    had bit 7 set (invalid input).
-//!
-//! # Encoder
+//! Encoder:
 //!
 //! [`NeonDecoder::encode_to_slice`] encodes raw bytes to Base64 ASCII using
-//! NEON interleaved loads (`vld3q_u8`) and a direct 64-byte `vqtbl4q_u8`
-//! forward lookup, falling back to scalar for the tail.
+//! interleaved NEON loads (`vld3q_u8`) and a direct 64-byte `vqtbl4q_u8`
+//! forward lookup, falling back to the scalar encoder for the tail.
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
 use super::{Base64Decoder, DecodeOpts};
@@ -53,7 +47,7 @@ fn has_neon_backend() -> bool {
     std::arch::is_aarch64_feature_detected!("neon")
 }
 
-/// NEON Base64 decoder and encoder (AArch64).
+/// NEON Base64 decoder and encoder for AArch64.
 ///
 /// The decoder validation mode is controlled by [`DecodeOpts`]:
 ///
@@ -153,24 +147,30 @@ impl Base64Decoder for NeonDecoder {
 }
 
 // ---------------------------------------------------------------------------
-// Shared decode dispatch
+// Shared decode dispatch & LUT
+// ---------------------------------------------------------------------------
+//
+// Dispatches a NEON decode function and falls back to the scalar path for
+// any remaining bytes. The SIMD engine processes as many full SIMD blocks
+// as possible and returns `(consumed, written)` describing how many input
+// bytes were consumed and how many output bytes were produced. Callers are
+// responsible for handling the scalar tail.
+//
+// The following section defines the 128-byte decode LUT used by the
+// SIMD de-lookup implementation (ASCII -> 6-bit value, 0xFF = invalid).
 // ---------------------------------------------------------------------------
 
-// Dispatches a NEON decode function, falling back to scalar for the tail.
-//
-// The SIMD engine processes as many full blocks as possible, returning
-// `(consumed, written)`. This helper calls the scalar fallback for any
-// remaining bytes.
-// ---------------------------------------------------------------------------
-// Decode LUT — 128-byte ASCII → 6-bit value (0xFF = invalid)
-// ---------------------------------------------------------------------------
+/// Wrapper to ensure the decode LUT is aligned to a 64-byte cache line.
+#[repr(C, align(64))]
+struct AlignedLut([u8; 128]);
 
 /// Base64 decode lookup table: ASCII byte → 6-bit value.
 ///
 /// Invalid entries are `0xFF`. The table is split into two 64-byte halves
 /// for the two-pass NEON table-lookup strategy.
+/// Cache-line aligned to avoid split loads.
 #[rustfmt::skip]
-static DECODE_LUT: [u8; 128] = [
+static DECODE_LUT: AlignedLut = AlignedLut([
     // 0x00 – 0x0F
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -195,7 +195,7 @@ static DECODE_LUT: [u8; 128] = [
     // 0x70 – 0x7F  p-z  { | } ~ DEL
       41,   42,   43,   44,   45,   46,   47,   48,
     49,   50,   51, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-];
+]);
 
 // ---------------------------------------------------------------------------
 // Decode engine — all functions require `target_feature(enable = "neon")`
@@ -205,44 +205,117 @@ mod decode_engine {
     use super::*;
 
     // -----------------------------------------------------------------------
-    // De-lookup: ASCII → 6-bit value using two-pass NEON table lookup
+    // Four-lane SIMD block type
     // -----------------------------------------------------------------------
 
-    /// Perform the two-pass de-lookup on a single 16-byte lane.
-    ///
-    /// Uses `vqtbl4q_u8(vlut1, byte ^ 0x40)` for the upper half (0x40–0x7F),
-    /// then `vqtbx4q_u8(result, vlut0, byte)` for the lower half (0x00–0x3F).
-    /// Invalid bytes end up as `0xFF`.
-    #[inline]
-    #[target_feature(enable = "neon")]
-    unsafe fn delookup(
-        v: uint8x16_t,
+    /// Four NEON 16-byte lanes — the canonical unit of a 64-byte Base64
+    /// block after de-interleaving or de-lookup.
+    #[derive(Clone, Copy)]
+    struct Quad(uint8x16_t, uint8x16_t, uint8x16_t, uint8x16_t);
+
+    impl From<uint8x16x4_t> for Quad {
+        #[inline]
+        fn from(v: uint8x16x4_t) -> Self {
+            Self(v.0, v.1, v.2, v.3)
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Decode LUT bundle
+    // -----------------------------------------------------------------------
+
+    /// Bundled decode LUT registers: the two 64-byte table halves and the
+    /// XOR constant for the upper-half lookup pass.
+    struct DecodeLuts {
         vlut0: uint8x16x4_t,
         vlut1: uint8x16x4_t,
         cv40: uint8x16_t,
-    ) -> uint8x16_t {
-        let upper = vqtbx4q_u8(vdupq_n_u8(0xFF), vlut1, veorq_u8(v, cv40));
-        vqtbx4q_u8(upper, vlut0, v)
     }
 
-    /// Accumulate invalid-byte markers from a decoded quad into the error
-    /// accumulator `xv`. After de-lookup, valid bytes have values 0–63 (bit 7
-    /// clear) and invalid bytes have `0xFF` (bit 7 set). ORing all four lanes
-    /// and the accumulator preserves any set bit 7.
+    impl DecodeLuts {
+        /// Load the 128-byte decode LUT into NEON registers.
+        #[inline]
+        #[target_feature(enable = "neon")]
+        unsafe fn load() -> Self {
+            Self {
+                vlut0: vld1q_u8_x4(DECODE_LUT.0.as_ptr()),
+                vlut1: vld1q_u8_x4(DECODE_LUT.0.as_ptr().add(64)),
+                cv40: vdupq_n_u8(0x40),
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Pure SIMD primitives (stateless)
+    // -----------------------------------------------------------------------
+
+    /// Issue a software prefetch for the cache line at `addr`.
     #[inline]
     #[target_feature(enable = "neon")]
-    unsafe fn b64chk(
-        v0: uint8x16_t,
-        v1: uint8x16_t,
-        v2: uint8x16_t,
-        v3: uint8x16_t,
-        xv: uint8x16_t,
-    ) -> uint8x16_t {
-        vorrq_u8(xv, vorrq_u8(vorrq_u8(v0, v1), vorrq_u8(v2, v3)))
+    unsafe fn prefetch(addr: *const u8) {
+        core::arch::asm!(
+            "prfm pldl1keep, [{addr}]",
+            addr = in(reg) addr,
+            options(nostack, preserves_flags),
+        );
     }
 
-    /// Check the error accumulator. Returns `true` if any byte had bit 7 set
-    /// (i.e. an invalid Base64 character was encountered).
+    /// Two-pass de-lookup for a single 16-byte lane using the loaded LUTs.
+    #[inline]
+    #[target_feature(enable = "neon")]
+    unsafe fn delookup(v: uint8x16_t, luts: &DecodeLuts) -> uint8x16_t {
+        let upper = vqtbl4q_u8(luts.vlut1, veorq_u8(v, luts.cv40));
+        vqtbx4q_u8(upper, luts.vlut0, v)
+    }
+
+    /// De-lookup all four lanes of a 64-byte block and return a `Quad` of results.
+    #[inline]
+    #[target_feature(enable = "neon")]
+    unsafe fn decode_lanes(iv: uint8x16x4_t, luts: &DecodeLuts) -> Quad {
+        Quad(
+            delookup(iv.0, luts),
+            delookup(iv.1, luts),
+            delookup(iv.2, luts),
+            delookup(iv.3, luts),
+        )
+    }
+
+    /// Pack four 6-bit lanes into three 8-bit vectors and return `uint8x16x3_t`
+    /// suitable for `vst3q_u8`.
+    #[inline]
+    #[target_feature(enable = "neon")]
+    unsafe fn bitpack(q: &Quad) -> uint8x16x3_t {
+        uint8x16x3_t(
+            vorrq_u8(vshlq_n_u8::<2>(q.0), vshrq_n_u8::<4>(q.1)),
+            vorrq_u8(vshlq_n_u8::<4>(q.1), vshrq_n_u8::<2>(q.2)),
+            vorrq_u8(vshlq_n_u8::<6>(q.2), q.3),
+        )
+    }
+
+    /// Fold four lanes into the error accumulator (OR tree) and return the
+    /// updated accumulator.
+    #[inline]
+    #[target_feature(enable = "neon")]
+    unsafe fn chk_fold(q: &Quad, xv: uint8x16_t) -> uint8x16_t {
+        vorrq_u8(xv, vorrq_u8(vorrq_u8(q.0, q.1), vorrq_u8(q.2, q.3)))
+    }
+
+    /// Strict combined check: OR decoded values with raw input bytes and
+    /// fold into the accumulator.
+    #[inline]
+    #[target_feature(enable = "neon")]
+    unsafe fn b64chk_strict(d: &Quad, raw: &Quad, xv: uint8x16_t) -> uint8x16_t {
+        vorrq_u8(
+            xv,
+            vorrq_u8(
+                vorrq_u8(vorrq_u8(d.0, raw.0), vorrq_u8(d.1, raw.1)),
+                vorrq_u8(vorrq_u8(d.2, raw.2), vorrq_u8(d.3, raw.3)),
+            ),
+        )
+    }
+
+    /// Return `true` if any accumulator byte has bit 7 set (indicates
+    /// invalid input).
     #[inline]
     #[target_feature(enable = "neon")]
     unsafe fn has_error(xv: uint8x16_t) -> bool {
@@ -250,224 +323,203 @@ mod decode_engine {
     }
 
     // -----------------------------------------------------------------------
-    // Bit-pack: four 6-bit lanes → three 8-bit lanes
+    // Decode context — bundles input/output cursors, LUTs and error accumulator
     // -----------------------------------------------------------------------
 
-    /// Pack four de-looked-up 16-byte lanes (6-bit values each) into three
-    /// 8-bit output lanes, suitable for `vst3q_u8`.
-    #[inline]
-    #[target_feature(enable = "neon")]
-    unsafe fn bitpack(
-        v0: uint8x16_t,
-        v1: uint8x16_t,
-        v2: uint8x16_t,
-        v3: uint8x16_t,
-    ) -> uint8x16x3_t {
-        uint8x16x3_t(
-            // byte0 = (A << 2) | (B >> 4)
-            vorrq_u8(vshlq_n_u8::<2>(v0), vshrq_n_u8::<4>(v1)),
-            // byte1 = (B << 4) | (C >> 2)
-            vorrq_u8(vshlq_n_u8::<4>(v1), vshrq_n_u8::<2>(v2)),
-            // byte2 = (C << 6) | D
-            vorrq_u8(vshlq_n_u8::<6>(v2), v3),
-        )
-    }
-
-    // -----------------------------------------------------------------------
-    // Process one 64-byte block: load, de-lookup, pack, store
-    // -----------------------------------------------------------------------
-
-    /// Decode one 64-byte block without validation.
-    #[inline]
-    #[target_feature(enable = "neon")]
-    unsafe fn decode_block_unchecked(
-        ip: *const u8,
-        op: *mut u8,
-        vlut0: uint8x16x4_t,
-        vlut1: uint8x16x4_t,
-        cv40: uint8x16_t,
-    ) {
-        let iv = vld4q_u8(ip);
-
-        let d0 = delookup(iv.0, vlut0, vlut1, cv40);
-        let d1 = delookup(iv.1, vlut0, vlut1, cv40);
-        let d2 = delookup(iv.2, vlut0, vlut1, cv40);
-        let d3 = delookup(iv.3, vlut0, vlut1, cv40);
-
-        let ov = bitpack(d0, d1, d2, d3);
-        vst3q_u8(op, ov);
-    }
-
-    /// Decode one 64-byte block and accumulate invalid-byte markers.
+    /// Mutable decode state used by the SIMD pipeline.
     ///
-    /// Keeping the validation fold in the same helper as the decode/store path
-    /// reduces vector tuple plumbing in the hot loop and more closely matches
-    /// the scheduling style used by the Turbo-Base64 C implementation.
-    #[inline]
-    #[target_feature(enable = "neon")]
-    unsafe fn decode_block_checked(
+    /// Methods assume the NEON CPU feature has been enabled for the caller.
+    struct DecodeCtx {
         ip: *const u8,
         op: *mut u8,
-        vlut0: uint8x16x4_t,
-        vlut1: uint8x16x4_t,
-        cv40: uint8x16_t,
-        xv: &mut uint8x16_t,
-    ) {
-        let iv = vld4q_u8(ip);
+        in_end: *const u8,
+        ip_start: *const u8,
+        op_start: *mut u8,
+        luts: DecodeLuts,
+        xv: uint8x16_t,
+    }
 
-        let d0 = delookup(iv.0, vlut0, vlut1, cv40);
-        let d1 = delookup(iv.1, vlut0, vlut1, cv40);
-        let d2 = delookup(iv.2, vlut0, vlut1, cv40);
-        let d3 = delookup(iv.3, vlut0, vlut1, cv40);
+    impl DecodeCtx {
+        #[inline]
+        #[target_feature(enable = "neon")]
+        unsafe fn new(in_data: &[u8], out_data: &mut [u8]) -> Self {
+            let ip_start = in_data.as_ptr();
+            let op_start = out_data.as_mut_ptr();
+            Self {
+                ip: ip_start,
+                op: op_start,
+                in_end: ip_start.add(in_data.len()),
+                ip_start,
+                op_start,
+                luts: DecodeLuts::load(),
+                xv: vdupq_n_u8(0),
+            }
+        }
 
-        let ov = bitpack(d0, d1, d2, d3);
-        *xv = b64chk(d0, d1, d2, d3, *xv);
-        vst3q_u8(op, ov);
+        #[inline]
+        fn remaining(&self) -> usize {
+            remaining(self.ip, self.in_end)
+        }
+
+        #[inline]
+        unsafe fn advance(&mut self, in_bytes: usize, out_bytes: usize) {
+            self.ip = self.ip.add(in_bytes);
+            self.op = self.op.add(out_bytes);
+        }
+
+        /// Decode one 64-byte block with full strict validation.
+        #[inline]
+        #[target_feature(enable = "neon")]
+        unsafe fn decode_block_checked(&mut self) {
+            let iv = vld4q_u8(self.ip);
+            let d = decode_lanes(iv, &self.luts);
+            self.xv = b64chk_strict(&d, &Quad::from(iv), self.xv);
+            vst3q_u8(self.op, bitpack(&d));
+        }
+
+        /// Process remaining 64-byte blocks, check for errors and return offsets.
+        ///
+        /// Returns `None` on invalid input.
+        #[inline]
+        #[target_feature(enable = "neon")]
+        unsafe fn decode_tail(mut self) -> Option<(usize, usize)> {
+            while self.remaining() > verify_model::DECODE_BLOCK_INPUT_BYTES {
+                self.decode_block_checked();
+                self.advance(64, 48);
+            }
+
+            if has_error(self.xv) {
+                return None;
+            }
+
+            Some(crate::engine::offsets(
+                self.ip,
+                self.op,
+                self.ip_start,
+                self.op_start,
+            ))
+        }
     }
 
     // -----------------------------------------------------------------------
     // Main decode functions
     // -----------------------------------------------------------------------
 
-    /// NEON Base64 decode — **non-strict** mode.
-    ///
-    /// Validates only one of every four 64-byte blocks per DN=256 iteration
-    /// (matching the C library's default `CHECK0`-only behaviour).
-    ///
-    /// Returns `(consumed_input, written_output)` or `None` on error.
+    /// NEON Base64 decode — **non-strict** mode (DN=256, CHECK0-only).
     ///
     /// # Safety
-    ///
-    /// Caller must ensure the NEON CPU feature is available.
+    /// The `neon` CPU feature must be available on the executing core.
     #[inline]
     #[target_feature(enable = "neon")]
     pub unsafe fn decode_neon(in_data: &[u8], out_data: &mut [u8]) -> Option<(usize, usize)> {
-        let ip_start = in_data.as_ptr();
-        let op_start = out_data.as_mut_ptr();
-        let inlen = in_data.len();
-        let in_end = ip_start.add(inlen);
+        let mut ctx = DecodeCtx::new(in_data, out_data);
 
-        // Load the two halves of the 128-byte decode LUT.
-        let vlut0 = vld1q_u8_x4(DECODE_LUT.as_ptr());
-        let vlut1 = vld1q_u8_x4(DECODE_LUT.as_ptr().add(64));
-        let cv40 = vdupq_n_u8(0x40);
-        let mut xv = vdupq_n_u8(0); // error accumulator
-
-        let mut ip = ip_start;
-        let mut op = op_start;
-
-        // DN=256: process 256 input bytes → 192 output bytes per iteration.
         const DN: usize = 256;
 
-        while remaining(ip, in_end) > DN {
-            // Block 0 (ip + 0): CHECK1 in non-strict → skip check
-            decode_block_unchecked(ip, op, vlut0, vlut1, cv40);
-            // Block 1 (ip + 64): CHECK1 → skip check
-            decode_block_unchecked(ip.add(64), op.add(48), vlut0, vlut1, cv40);
-            // Block 2 (ip + 128): CHECK1 → skip check
-            decode_block_unchecked(ip.add(128), op.add(96), vlut0, vlut1, cv40);
-            // Block 3 (ip + 192): CHECK0 → always check
-            decode_block_checked(ip.add(192), op.add(144), vlut0, vlut1, cv40, &mut xv);
+        while ctx.remaining() > DN {
+            // Blocks 0 & 1: load, decode, pack (no validation)
+            let iv0 = vld4q_u8(ctx.ip);
+            let d0 = decode_lanes(iv0, &ctx.luts);
+            let ov0 = bitpack(&d0);
 
-            // Match Turbo-Base64's default CHECK0 schedule: in each 256-byte
-            // decode group only the last 64-byte block contributes to the
-            // validation accumulator.
+            let iv1 = vld4q_u8(ctx.ip.add(64));
+            let d1 = decode_lanes(iv1, &ctx.luts);
+            let ov1 = bitpack(&d1);
 
-            ip = ip.add(DN);
-            op = op.add((DN / 4) * 3);
+            // Early load blocks 2 & 3 (software pipelining)
+            let iv2 = vld4q_u8(ctx.ip.add(128));
+            let iv3 = vld4q_u8(ctx.ip.add(192));
+
+            // Store blocks 0 & 1
+            vst3q_u8(ctx.op, ov0);
+            vst3q_u8(ctx.op.add(48), ov1);
+
+            // Block 2: decode, pack (no validation)
+            let d2 = decode_lanes(iv2, &ctx.luts);
+            let ov2 = bitpack(&d2);
+
+            // Block 3: decode + CHECK0
+            ctx.xv = chk_fold(&Quad::from(iv3), ctx.xv);
+            let d3 = decode_lanes(iv3, &ctx.luts);
+            ctx.xv = chk_fold(&d3, ctx.xv);
+            let ov3 = bitpack(&d3);
+
+            // Store blocks 2 & 3
+            vst3q_u8(ctx.op.add(96), ov2);
+            vst3q_u8(ctx.op.add(144), ov3);
+
+            ctx.advance(DN, (DN / 4) * 3);
         }
 
-        // Cleanup loop: 64 bytes at a time, always leaving the final block for
-        // scalar so the semantic last quantum (and any padding) is never
-        // handled by the raw SIMD block decoder.
-        while remaining(ip, in_end) > verify_model::DECODE_BLOCK_INPUT_BYTES {
-            decode_block_checked(ip, op, vlut0, vlut1, cv40, &mut xv);
-            ip = ip.add(64);
-            op = op.add(48);
-        }
-
-        // Check for errors accumulated in SIMD path.
-        if has_error(xv) {
-            return None;
-        }
-
-        Some(crate::engine::offsets(ip, op, ip_start, op_start))
+        ctx.decode_tail()
     }
 
-    /// NEON Base64 decode — **strict** mode.
-    ///
-    /// Validates all four 64-byte blocks per DN=256 iteration.
-    ///
-    /// Returns `(consumed_input, written_output)` or `None` on error.
+    /// NEON Base64 decode — **strict** mode (DN=128, dual-accumulator).
     ///
     /// # Safety
-    ///
-    /// Caller must ensure the NEON CPU feature is available.
+    /// The `neon` CPU feature must be available on the executing core.
     #[inline]
     #[target_feature(enable = "neon")]
     pub unsafe fn decode_neon_strict(
         in_data: &[u8],
         out_data: &mut [u8],
     ) -> Option<(usize, usize)> {
-        let ip_start = in_data.as_ptr();
-        let op_start = out_data.as_mut_ptr();
-        let inlen = in_data.len();
-        let in_end = ip_start.add(inlen);
+        let mut ctx = DecodeCtx::new(in_data, out_data);
+        let mut rv = vdupq_n_u8(0);
 
-        // Load the two halves of the 128-byte decode LUT.
-        let vlut0 = vld1q_u8_x4(DECODE_LUT.as_ptr());
-        let vlut1 = vld1q_u8_x4(DECODE_LUT.as_ptr().add(64));
-        let cv40 = vdupq_n_u8(0x40);
-        let mut xv = vdupq_n_u8(0); // error accumulator
+        const DN: usize = 128;
 
-        let mut ip = ip_start;
-        let mut op = op_start;
+        let simd_limit = if in_data.len() > DN {
+            ctx.in_end as usize - DN
+        } else {
+            0
+        };
 
-        // DN=256: process 256 input bytes → 192 output bytes per iteration.
-        const DN: usize = 256;
+        while (ctx.ip as usize) < simd_limit {
+            prefetch(ctx.ip.add(DN));
 
-        while remaining(ip, in_end) > DN {
-            // Block 0 (ip + 0): validate
-            decode_block_checked(ip, op, vlut0, vlut1, cv40, &mut xv);
+            // Early load both blocks
+            let iv0 = vld4q_u8(ctx.ip);
+            let iv1 = vld4q_u8(ctx.ip.add(64));
 
-            // Block 1 (ip + 64): validate
-            decode_block_checked(ip.add(64), op.add(48), vlut0, vlut1, cv40, &mut xv);
+            // Decode both blocks
+            let d0 = decode_lanes(iv0, &ctx.luts);
+            let ov0 = bitpack(&d0);
 
-            // Block 2 (ip + 128): validate
-            decode_block_checked(ip.add(128), op.add(96), vlut0, vlut1, cv40, &mut xv);
+            let d1 = decode_lanes(iv1, &ctx.luts);
+            let ov1 = bitpack(&d1);
 
-            // Block 3 (ip + 192): validate
-            decode_block_checked(ip.add(192), op.add(144), vlut0, vlut1, cv40, &mut xv);
+            // Error checks (dual-acc: xv for decoded, rv for raw)
+            ctx.xv = chk_fold(&d0, ctx.xv);
+            ctx.xv = chk_fold(&d1, ctx.xv);
+            rv = chk_fold(&Quad::from(iv0), rv);
+            rv = chk_fold(&Quad::from(iv1), rv);
 
-            ip = ip.add(DN);
-            op = op.add((DN / 4) * 3);
+            // Store blocks 0 & 1
+            vst3q_u8(ctx.op, ov0);
+            vst3q_u8(ctx.op.add(48), ov1);
+
+            ctx.advance(DN, 96);
         }
 
-        // Cleanup loop: 64 bytes at a time, always leaving the final block for
-        // scalar so the semantic last quantum (and any padding) is never
-        // handled by the raw SIMD block decoder.
-        while remaining(ip, in_end) > verify_model::DECODE_BLOCK_INPUT_BYTES {
-            decode_block_checked(ip, op, vlut0, vlut1, cv40, &mut xv);
-            ip = ip.add(64);
-            op = op.add(48);
-        }
+        // Merge raw-input accumulator before tail check.
+        ctx.xv = vorrq_u8(ctx.xv, rv);
 
-        // Check for errors accumulated in SIMD path.
-        if has_error(xv) {
-            return None;
-        }
-
-        Some(crate::engine::offsets(ip, op, ip_start, op_start))
+        ctx.decode_tail()
     }
 }
 
-// ---------------------------------------------------------------------------
-// Public kernel re-exports (for perf_compare and external benchmarks)
-// ---------------------------------------------------------------------------
+/// Thin wrapper that calls the non-strict NEON decode kernel.
+///
+/// # Safety
+/// The `neon` CPU feature must be available on the executing core.
+#[target_feature(enable = "neon")]
+pub unsafe fn decode_neon_kernel_partial(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
+    unsafe { decode_engine::decode_neon(input, out) }
+}
 
-/// NEON strict-mode decode kernel.  Processes as many full 64-byte input
-/// blocks as possible and returns `(consumed, written)`, or `None` on invalid
-/// input.  The caller is responsible for scalar tail handling.
+/// NEON strict-mode decode kernel.  Returns `(consumed_input, written_output)`
+/// or `None` on invalid input.
 ///
 /// # Safety
 /// The `neon` CPU feature must be available on the executing core.
@@ -475,16 +527,6 @@ mod decode_engine {
 #[target_feature(enable = "neon")]
 pub unsafe fn decode_neon_kernel_strict(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
     unsafe { decode_engine::decode_neon_strict(input, out) }
-}
-
-/// NEON non-strict (CHECK0) decode kernel.
-///
-/// # Safety
-/// The `neon` CPU feature must be available on the executing core.
-#[cfg(target_arch = "aarch64")]
-#[target_feature(enable = "neon")]
-pub unsafe fn decode_neon_kernel_partial(input: &[u8], out: &mut [u8]) -> Option<(usize, usize)> {
-    unsafe { decode_engine::decode_neon(input, out) }
 }
 
 /// NEON encode kernel.  Returns `(consumed_input, written_output)`.
@@ -508,35 +550,76 @@ mod encode_engine {
     static ENCODE_LUT: [u8; 64] =
         *b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-    /// Bit-unpack three 8-bit input lanes into four 6-bit lanes, then
-    /// forward-lookup each 6-bit value through the Base64 alphabet LUT.
-    #[inline]
-    #[target_feature(enable = "neon")]
-    unsafe fn encode_block(ip: *const u8, op: *mut u8, vlut: uint8x16x4_t, cv3f: uint8x16_t) {
-        let iv = vld3q_u8(ip);
+    /// Mutable encode state: input/output cursors and loaded LUT registers.
+    struct EncodeCtx {
+        ip: *const u8,
+        op: *mut u8,
+        in_end: *const u8,
+        ip_start: *const u8,
+        op_start: *mut u8,
+        vlut: uint8x16x4_t,
+        cv3f: uint8x16_t,
+    }
 
-        // Bit-unpack: 3 bytes → 4 six-bit values
-        let a = vshrq_n_u8::<2>(iv.0);
-        let b = vandq_u8(vorrq_u8(vshlq_n_u8::<4>(iv.0), vshrq_n_u8::<4>(iv.1)), cv3f);
-        let c = vandq_u8(vorrq_u8(vshlq_n_u8::<2>(iv.1), vshrq_n_u8::<6>(iv.2)), cv3f);
-        let d = vandq_u8(iv.2, cv3f);
+    impl EncodeCtx {
+        #[inline]
+        #[target_feature(enable = "neon")]
+        unsafe fn new(in_data: &[u8], out_data: &mut [u8]) -> Self {
+            let ip_start = in_data.as_ptr();
+            let op_start = out_data.as_mut_ptr();
+            Self {
+                ip: ip_start,
+                op: op_start,
+                in_end: ip_start.add(in_data.len()),
+                ip_start,
+                op_start,
+                vlut: vld1q_u8_x4(ENCODE_LUT.as_ptr()),
+                cv3f: vdupq_n_u8(0x3F),
+            }
+        }
 
-        // Forward lookup: 6-bit → ASCII
-        let ov = uint8x16x4_t(
-            vqtbl4q_u8(vlut, a),
-            vqtbl4q_u8(vlut, b),
-            vqtbl4q_u8(vlut, c),
-            vqtbl4q_u8(vlut, d),
-        );
+        #[inline]
+        fn remaining(&self) -> usize {
+            remaining(self.ip, self.in_end)
+        }
 
-        vst4q_u8(op, ov);
+        /// Encode one 48→64 byte block at the current position and advance
+        /// the internal input/output cursors.
+        #[inline]
+        #[target_feature(enable = "neon")]
+        unsafe fn encode_block(&mut self) {
+            let iv = vld3q_u8(self.ip);
+
+            // Bit-unpack: 3 bytes → 4 six-bit values
+            let a = vshrq_n_u8::<2>(iv.0);
+            let b = vandq_u8(
+                vorrq_u8(vshlq_n_u8::<4>(iv.0), vshrq_n_u8::<4>(iv.1)),
+                self.cv3f,
+            );
+            let c = vandq_u8(
+                vorrq_u8(vshlq_n_u8::<2>(iv.1), vshrq_n_u8::<6>(iv.2)),
+                self.cv3f,
+            );
+            let d = vandq_u8(iv.2, self.cv3f);
+
+            // Forward lookup: 6-bit → ASCII
+            let ov = uint8x16x4_t(
+                vqtbl4q_u8(self.vlut, a),
+                vqtbl4q_u8(self.vlut, b),
+                vqtbl4q_u8(self.vlut, c),
+                vqtbl4q_u8(self.vlut, d),
+            );
+
+            vst4q_u8(self.op, ov);
+            self.ip = self.ip.add(verify_model::ENCODE_BLOCK_INPUT_BYTES);
+            self.op = self.op.add(verify_model::ENCODE_BLOCK_OUTPUT_BYTES);
+        }
     }
 
     /// NEON Base64 encode.
     ///
-    /// Processes input in blocks of 96 bytes (-> 128 output bytes), two blocks
-    /// per main-loop iteration (EN=128 output bytes per pair processed
-    /// sequentially). Returns `(consumed_input, written_output)`.
+    /// Processes input in pairs of 48-byte blocks (96→128), then single
+    /// blocks (48→64). Returns `(consumed_input, written_output)`.
     ///
     /// # Safety
     ///
@@ -544,33 +627,17 @@ mod encode_engine {
     #[inline]
     #[target_feature(enable = "neon")]
     pub unsafe fn encode_base64_neon(in_data: &[u8], out_data: &mut [u8]) -> (usize, usize) {
-        let ip_start = in_data.as_ptr();
-        let op_start = out_data.as_mut_ptr();
-        let inlen = in_data.len();
-        let in_end = ip_start.add(inlen);
+        let mut ctx = EncodeCtx::new(in_data, out_data);
 
-        let vlut = vld1q_u8_x4(ENCODE_LUT.as_ptr());
-        let cv3f = vdupq_n_u8(0x3F);
-
-        let mut ip = ip_start;
-        let mut op = op_start;
-
-        // EN=128: process 128 output bytes (96 input bytes) per iteration,
-        // split into 2× 48→64 sub-blocks.
-        while verify_model::can_run_encode_pair(remaining(ip, in_end)) {
-            encode_block(ip, op, vlut, cv3f);
-            encode_block(ip.add(48), op.add(64), vlut, cv3f);
-            ip = ip.add(verify_model::ENCODE_PAIR_INPUT_BYTES);
-            op = op.add(verify_model::ENCODE_PAIR_OUTPUT_BYTES);
+        while verify_model::can_run_encode_pair(ctx.remaining()) {
+            ctx.encode_block();
+            ctx.encode_block();
         }
 
-        // Cleanup loop: 64 output bytes (48 input bytes) at a time.
-        while verify_model::can_run_encode_block(remaining(ip, in_end)) {
-            encode_block(ip, op, vlut, cv3f);
-            ip = ip.add(verify_model::ENCODE_BLOCK_INPUT_BYTES);
-            op = op.add(verify_model::ENCODE_BLOCK_OUTPUT_BYTES);
+        while verify_model::can_run_encode_block(ctx.remaining()) {
+            ctx.encode_block();
         }
 
-        crate::engine::offsets(ip, op, ip_start, op_start)
+        crate::engine::offsets(ctx.ip, ctx.op, ctx.ip_start, ctx.op_start)
     }
 }
