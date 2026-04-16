@@ -1,3 +1,5 @@
+#![cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+
 use oxid64::engine::avx2::Avx2Decoder;
 use oxid64::engine::scalar::encode_base64_fast;
 use proptest::prelude::*;

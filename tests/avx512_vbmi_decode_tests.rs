@@ -1,3 +1,5 @@
+#![cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+
 use oxid64::engine::DecodeOpts;
 use oxid64::engine::avx512vbmi::Avx512VbmiDecoder;
 use oxid64::engine::scalar::{decode_base64_fast, encode_base64_fast};
