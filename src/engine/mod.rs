@@ -22,6 +22,8 @@ pub mod avx512vbmi;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub mod ssse3;
 
+pub(crate) type DecodeFn = unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>;
+
 // ---------------------------------------------------------------------------
 // Byte-to-signed helpers (zero-cost cast for SIMD intrinsic arguments)
 // ---------------------------------------------------------------------------
@@ -61,11 +63,7 @@ pub(crate) const fn d2i(v: u64) -> i64 {
 #[inline]
 #[allow(clippy::type_complexity)]
 #[doc(hidden)]
-pub fn dispatch_decode(
-    input: &[u8],
-    out: &mut [u8],
-    simd_fn: unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>,
-) -> Option<usize> {
+pub fn dispatch_decode(input: &[u8], out: &mut [u8], simd_fn: DecodeFn) -> Option<usize> {
     // SAFETY: caller guarantees the required target feature is available.
     let (consumed, mut written) = unsafe { simd_fn(input, out)? };
 

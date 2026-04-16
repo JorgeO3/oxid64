@@ -5,7 +5,7 @@
 //! processed in parallel per `__m256i` register.
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{Base64Decoder, DecodeOpts, b2i, w2i};
+use super::{Base64Decoder, DecodeFn, DecodeOpts, b2i, w2i};
 use crate::engine::common::{assert_encode_capacity, prepare_decode_output, remaining};
 use crate::engine::models::avx2 as verify_model;
 
@@ -85,19 +85,16 @@ impl Avx2Decoder {
     /// Returns `None` if the input contains invalid Base64 characters in the
     /// selected validation mode. For untrusted input, use strict mode.
     #[inline]
+    #[rustfmt::skip]
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
-        let _out_len = prepare_decode_output(input, out)?;
-
+        prepare_decode_output(input, out)?;
         if self.available {
-            let engine_fn = if self.opts.strict {
-                decode_engine::decode_avx2_strict
-                    as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
-            } else {
-                decode_engine::decode_avx2 as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
-            };
-            return super::dispatch_decode(input, out, engine_fn);
+            return super::dispatch_decode(input, out, match self.opts.strict {
+                    true => decode_engine::decode_avx2_strict as DecodeFn,
+                    false => decode_engine::decode_avx2 as DecodeFn,
+                },
+            );
         }
-
         decode_base64_fast(input, out)
     }
 

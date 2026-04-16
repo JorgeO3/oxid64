@@ -6,7 +6,7 @@
 //! Requires Ice Lake or later.
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{Base64Decoder, DecodeOpts, d2i, w2i};
+use super::{Base64Decoder, DecodeFn, DecodeOpts, d2i, w2i};
 use crate::engine::common::{assert_encode_capacity, prepare_decode_output, remaining};
 use crate::engine::models::avx512vbmi as verify_model;
 
@@ -25,6 +25,7 @@ use core::arch::x86_64::*;
 /// - `Avx512VbmiDecoder::with_opts(opts)` — custom configuration.
 pub struct Avx512VbmiDecoder {
     opts: DecodeOpts,
+    available: bool,
 }
 
 #[inline]
@@ -40,13 +41,17 @@ impl Avx512VbmiDecoder {
     pub fn new() -> Self {
         Self {
             opts: DecodeOpts::default(),
+            available: has_avx512vbmi(),
         }
     }
 
     /// Create a new decoder with the given options.
     #[inline]
     pub fn with_opts(opts: DecodeOpts) -> Self {
-        Self { opts }
+        Self {
+            opts,
+            available: has_avx512vbmi(),
+        }
     }
 
     /// Decode Base64 `input` into `out`, returning the number of bytes written.
@@ -56,18 +61,16 @@ impl Avx512VbmiDecoder {
     ///
     /// Returns `None` if the input contains invalid Base64 characters.
     #[inline]
+    #[rustfmt::skip]
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
-        let _out_len = prepare_decode_output(input, out)?;
+        prepare_decode_output(input, out)?;
 
-        if has_avx512vbmi() {
-            let engine_fn = if self.opts.strict {
-                decode_engine::decode_avx512_strict
-                    as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
-            } else {
-                decode_engine::decode_avx512
-                    as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
-            };
-            return super::dispatch_decode(input, out, engine_fn);
+        if  self.available {
+            return super::dispatch_decode(input, out, match self.opts.strict {
+                    true => decode_engine::decode_avx512_strict as DecodeFn,
+                    false => decode_engine::decode_avx512 as DecodeFn,
+                },
+            );
         }
 
         decode_base64_fast(input, out)
