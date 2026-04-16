@@ -12,3 +12,6 @@ Cargo.lock
 /base64
 
 /fastbase64
+ 
+# Fuzzing corpus (do not commit generated corpora)
+fuzz/corpus/
