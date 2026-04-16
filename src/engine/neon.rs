@@ -35,7 +35,7 @@
 //! forward lookup, falling back to the scalar encoder for the tail.
 
 use super::scalar::{decode_base64_fast, encode_base64_fast};
-use super::{Base64Decoder, DecodeOpts};
+use super::{Base64Decoder, DecodeFn, DecodeOpts};
 use crate::engine::common::remaining;
 use crate::engine::common::{assert_encode_capacity, prepare_decode_output};
 use crate::engine::models::neon as verify_model;
@@ -58,6 +58,7 @@ fn has_neon_backend() -> bool {
 /// of decoder options.
 pub struct NeonDecoder {
     opts: DecodeOpts,
+    available: bool,
 }
 
 impl NeonDecoder {
@@ -66,13 +67,17 @@ impl NeonDecoder {
     pub fn new() -> Self {
         Self {
             opts: DecodeOpts::default(),
+            available: has_neon_backend(),
         }
     }
 
     /// Create a new decoder with the given options.
     #[inline]
     pub fn with_opts(opts: DecodeOpts) -> Self {
-        Self { opts }
+        Self {
+            opts,
+            available: has_neon_backend(),
+        }
     }
 
     /// Decode Base64 `input` into `out`, returning the number of bytes written.
@@ -85,17 +90,16 @@ impl NeonDecoder {
     /// In non-strict mode, this is a trusted-input `CHECK0` contract and does
     /// not validate every SIMD-processed block.
     #[inline]
+    #[rustfmt::skip]
     pub fn decode_to_slice(&self, input: &[u8], out: &mut [u8]) -> Option<usize> {
         let _out_len = prepare_decode_output(input, out)?;
 
-        if has_neon_backend() {
-            let engine_fn = if self.opts.strict {
-                decode_engine::decode_neon_strict
-                    as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
-            } else {
-                decode_engine::decode_neon as unsafe fn(&[u8], &mut [u8]) -> Option<(usize, usize)>
-            };
-            return super::dispatch_decode(input, out, engine_fn);
+        if self.available {
+            return super::dispatch_decode(input, out, match self.opts.strict {
+                    true => decode_engine::decode_neon_strict as DecodeFn,
+                    false => decode_engine::decode_neon as DecodeFn,
+                },
+            );
         }
 
         decode_base64_fast(input, out)
