@@ -1,19 +1,27 @@
 # CI workflow for oxid64
 #
-# PR / push to main:
-#   - lint-and-test: fmt, clippy, cargo test (fast gate, ~2 min)
-#   - miri: Miri with strict flags on lib + integration tests (~10-15 min)
+# PR / push to main (x86_64):
+#   - lint-and-test: fmt, clippy, nextest (fast gate, ~2 min)
 #   - careful: cargo-careful on lib + tests (~3-5 min)
-#   - sanitizers: ASan + MSan (~5-10 min)
+#   - miri-lib: Miri on lib tests (~3 min)
+#   - miri-contracts: Miri on contracts (~3 min)
+#   - miri-models: Miri on backend models (~5 min)
+#   - asan: AddressSanitizer (~5-10 min)
+#   - msan: MemorySanitizer (~5-10 min)
 #
 # Nightly schedule (or manual dispatch):
-#   - All of the above plus Kani proofs and fuzz-build smoke.
+#   - All of the above plus:
+#   - miri-integration: Miri on full integration tests + proptest bins
+#   - miri-many-seeds: Miri many-seeds exploration
+#   - kani-core, kani-ssse3, kani-avx2, kani-avx512, kani-neon, kani-wasm (parallel)
+#   - fuzz-build-and-smoke: build all targets + smoke runs
+#   - proptest-extended: high case-count property testing
 #
 # Notes:
-#   - The Turbo-Base64 C library is only needed for benchmarks and C comparisons,
-#     NOT for the Rust test suite. We skip `just build-c` in CI to avoid clang/make
-#     dependencies unless explicitly needed.
-#   - Kani and cargo-fuzz are heavyweight; they run only on nightly schedule.
+#   - The Turbo-Base64 C library is only needed for benchmarks (c-benchmarks feature),
+#     NOT for the Rust test suite.
+#   - Kani and cargo-fuzz are heavyweight; they run only on nightly schedule or manual.
+#   - Miri shards, sanitizers, and Kani families run as separate parallel jobs.
 
 name: CI
 
@@ -29,12 +37,13 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Reduce proptest cases in CI for speed; full runs happen locally.
+  # Reduce proptest cases in CI for speed; full runs happen locally or nightly.
   PROPTEST_CASES: "256"
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────
   # Fast gate: format, lint, test (~2 min)
+  # Always runs on PR/push/schedule/dispatch.
   # ─────────────────────────────────────────────────────────────────────
   lint-and-test:
     name: Lint & Test
@@ -47,6 +56,9 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
@@ -55,46 +67,116 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Build
-        run: cargo build --all-targets
+      - name: Cross-check aarch64 (lib only)
+        run: |
+          rustup target add aarch64-unknown-linux-gnu
+          cargo check --target aarch64-unknown-linux-gnu --lib
+          cargo clippy --target aarch64-unknown-linux-gnu --lib -- -D warnings
 
-      - name: Test
-        run: cargo test
+      - name: Test (nextest)
+        run: cargo nextest run --lib --tests
+
+      - name: Doctests
+        run: cargo test --doc
 
   # ─────────────────────────────────────────────────────────────────────
-  # Miri: strict provenance + symbolic alignment (~10-15 min)
+  # cargo-careful (~3-5 min)
   # ─────────────────────────────────────────────────────────────────────
-  miri:
-    name: Miri
+  careful:
+    name: cargo-careful
     runs-on: ubuntu-latest
+    needs: lint-and-test
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-careful
+        run: cargo install cargo-careful
+      - name: Run cargo-careful
+        run: |
+          cargo +nightly careful test --lib --tests
+          cargo +nightly careful test --doc
 
-      - name: Install Rust nightly + Miri
-        uses: dtolnay/rust-toolchain@nightly
+  # ─────────────────────────────────────────────────────────────────────
+  # Miri shard: lib (~3 min)
+  # ─────────────────────────────────────────────────────────────────────
+  miri-lib:
+    name: Miri (lib)
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    env:
+      MIRIFLAGS: -Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
-
       - uses: Swatinem/rust-cache@v2
-
-      - name: Run Miri on lib tests
-        env:
-          MIRIFLAGS: >-
-            -Zmiri-symbolic-alignment-check
-            -Zmiri-strict-provenance
-            -Zmiri-disable-isolation
+      - name: Miri --lib
         run: cargo +nightly miri test --lib
 
-      - name: Run Miri on integration tests
-        env:
-          MIRIFLAGS: >-
-            -Zmiri-symbolic-alignment-check
-            -Zmiri-strict-provenance
-            -Zmiri-disable-isolation
+  # ─────────────────────────────────────────────────────────────────────
+  # Miri shard: contracts (~3 min)
+  # ─────────────────────────────────────────────────────────────────────
+  miri-contracts:
+    name: Miri (contracts)
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    env:
+      MIRIFLAGS: -Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - name: Miri contracts
         run: |
           cargo +nightly miri test --test scalar_contracts
           cargo +nightly miri test --test common_contracts
           cargo +nightly miri test --test msan_scalar_contracts
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Miri shard: backend models (~5 min)
+  # ─────────────────────────────────────────────────────────────────────
+  miri-models:
+    name: Miri (models)
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    env:
+      MIRIFLAGS: -Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - name: Miri models
+        run: |
+          cargo +nightly miri test --test ssse3_models
+          cargo +nightly miri test --test avx2_models
+          cargo +nightly miri test --test avx512_vbmi_models
+          cargo +nightly miri test --test neon_models
+          cargo +nightly miri test --test wasm_simd128_models
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Miri shard: integration + proptest (nightly/dispatch only, ~15 min)
+  # ─────────────────────────────────────────────────────────────────────
+  miri-integration:
+    name: Miri (integration)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: lint-and-test
+    env:
+      MIRIFLAGS: -Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - name: Miri integration + proptest
+        run: |
           cargo +nightly miri test --test proptest
           cargo +nightly miri test --test simd_fuzz_strict
           cargo +nightly miri test --test sse_decode_tests
@@ -103,51 +185,39 @@ jobs:
           cargo +nightly miri test --test avx2_encode_tests
           cargo +nightly miri test --test avx512_vbmi_decode_tests
           cargo +nightly miri test --test avx512_vbmi_encode_tests
-          cargo +nightly miri test --test ssse3_models
-          cargo +nightly miri test --test avx2_models
-          cargo +nightly miri test --test avx512_vbmi_models
-          cargo +nightly miri test --test neon_models
-          cargo +nightly miri test --test wasm_simd128_models
 
   # ─────────────────────────────────────────────────────────────────────
-  # cargo-careful: extra UB checks beyond debug mode (~3-5 min)
+  # Miri many-seeds (nightly/dispatch only, ~5 min)
   # ─────────────────────────────────────────────────────────────────────
-  careful:
-    name: cargo-careful
+  miri-many-seeds:
+    name: Miri (many-seeds)
     runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: lint-and-test
+    env:
+      MIRIFLAGS: -Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-many-seeds=0..4
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
       - uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-careful
-        run: cargo install cargo-careful
-
-      - name: Run cargo-careful
-        run: |
-          cargo +nightly careful test --lib --tests
-          cargo +nightly careful test --doc
+      - name: Miri many-seeds --lib
+        run: cargo +nightly miri test --lib
 
   # ─────────────────────────────────────────────────────────────────────
-  # Sanitizers: AddressSanitizer + MemorySanitizer (~5-10 min)
-  # Requires nightly + -Zbuild-std for sanitizer runtime.
+  # AddressSanitizer (~5-10 min)
   # ─────────────────────────────────────────────────────────────────────
-  sanitizers:
-    name: ASan + MSan
+  asan:
+    name: ASan
     runs-on: ubuntu-latest
+    needs: lint-and-test
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust nightly + rust-src
-        uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
-
       - uses: Swatinem/rust-cache@v2
-
       - name: AddressSanitizer
         env:
           ASAN_OPTIONS: detect_leaks=0
@@ -157,6 +227,19 @@ jobs:
           cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --lib --tests
           cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --doc
 
+  # ─────────────────────────────────────────────────────────────────────
+  # MemorySanitizer (~5-10 min)
+  # ─────────────────────────────────────────────────────────────────────
+  msan:
+    name: MSan
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
       - name: MemorySanitizer
         env:
           MSAN_OPTIONS: "halt_on_error=1,exit_code=86,poison_in_dtor=1"
@@ -167,23 +250,18 @@ jobs:
           cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --doc
 
   # ─────────────────────────────────────────────────────────────────────
-  # Kani proofs (nightly schedule / manual only — heavyweight)
+  # Kani: per-family parallel jobs (nightly/dispatch only)
   # ─────────────────────────────────────────────────────────────────────
-  kani:
-    name: Kani Proofs
+  kani-core:
+    name: Kani (core)
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Kani
-        uses: model-checking/kani-install@v0.1
-
+      - uses: model-checking/kani-install@v0.1
       - uses: Swatinem/rust-cache@v2
-
-      - name: Run all Kani harnesses
+      - name: Core harnesses
         run: |
-          # Core harnesses
           cargo kani --default-unwind 8 --harness remaining_matches_pointer_delta_within_allocation
           cargo kani --default-unwind 8 --harness can_read_and_can_write_agree_with_remaining
           cargo kani --default-unwind 8 --harness safe_in_end_for_4_within_allocation
@@ -193,14 +271,32 @@ jobs:
           cargo kani --default-unwind 8 --harness decoded_and_encoded_lengths_stay_bounded_in_small_domain
           cargo kani --default-unwind 8 --harness decode_offsets_monotonic_and_dispatch_contracts_hold
 
-          # SSSE3
+  kani-ssse3:
+    name: Kani (SSSE3)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: model-checking/kani-install@v0.1
+      - uses: Swatinem/rust-cache@v2
+      - name: SSSE3 harnesses
+        run: |
           cargo kani --default-unwind 8 --harness ssse3_ds64_store_offsets_fit_guarded_output
           cargo kani --default-unwind 8 --harness ssse3_ds64_double_store_offsets_fit_guarded_output
           cargo kani --default-unwind 8 --harness ssse3_tail16_store_fits_guarded_output
           cargo kani --default-unwind 8 --harness ssse3_non_strict_schedule_model_matches_documented_lanes
           cargo kani --default-unwind 8 --harness ssse3_written_prefix_model_is_bounded_by_decoded_output
 
-          # AVX2
+  kani-avx2:
+    name: Kani (AVX2)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: model-checking/kani-install@v0.1
+      - uses: Swatinem/rust-cache@v2
+      - name: AVX2 harnesses
+        run: |
           cargo kani --default-unwind 8 --harness avx2_ds128_store_offsets_fit_guarded_output
           cargo kani --default-unwind 8 --harness avx2_ds128_double_store_offsets_fit_guarded_output
           cargo kani --default-unwind 8 --harness avx2_ds128_triple_store_offsets_fit_guarded_output
@@ -210,7 +306,16 @@ jobs:
           cargo kani --default-unwind 8 --harness avx2_partial_written_prefix_model_is_bounded_by_decoded_output
           cargo kani --default-unwind 8 --harness avx2_unchecked_preflight_matches_documented_contract
 
-          # AVX-512
+  kani-avx512:
+    name: Kani (AVX-512)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: model-checking/kani-install@v0.1
+      - uses: Swatinem/rust-cache@v2
+      - name: AVX-512 harnesses
+        run: |
           cargo kani --default-unwind 8 --harness avx512_ds256_store_offsets_fit_guarded_output
           cargo kani --default-unwind 8 --harness avx512_ds256_double_store_offsets_fit_guarded_output
           cargo kani --default-unwind 8 --harness avx512_non_strict_schedule_model_matches_documented_lanes
@@ -218,13 +323,31 @@ jobs:
           cargo kani --default-unwind 8 --harness avx512_encode_schedule_is_contiguous_without_gaps
           cargo kani --default-unwind 8 --harness avx512_encode_required_input_matches_farthest_load
 
-          # NEON
+  kani-neon:
+    name: Kani (NEON)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: model-checking/kani-install@v0.1
+      - uses: Swatinem/rust-cache@v2
+      - name: NEON harnesses
+        run: |
           cargo kani --default-unwind 8 --harness neon_non_strict_schedule_model_matches_documented_lanes
           cargo kani --default-unwind 8 --harness neon_written_prefix_model_is_bounded_by_decoded_output
           cargo kani --default-unwind 8 --harness neon_encode_prefix_consumes_only_full_blocks
           cargo kani --default-unwind 8 --harness neon_encode_required_input_matches_block_boundaries
 
-          # WASM
+  kani-wasm:
+    name: Kani (WASM)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: model-checking/kani-install@v0.1
+      - uses: Swatinem/rust-cache@v2
+      - name: WASM harnesses
+        run: |
           cargo kani --default-unwind 8 --harness wasm_ds64_store_offsets_fit_guarded_output
           cargo kani --default-unwind 8 --harness wasm_ds64_double_store_offsets_fit_guarded_output
           cargo kani --default-unwind 8 --harness wasm_tail16_store_fits_guarded_output
@@ -235,7 +358,7 @@ jobs:
           cargo kani --default-unwind 8 --harness wasm_encode_required_input_matches_block_boundaries
 
   # ─────────────────────────────────────────────────────────────────────
-  # Fuzz build + smoke (nightly schedule / manual only)
+  # Fuzz build + smoke (nightly/dispatch only)
   # ─────────────────────────────────────────────────────────────────────
   fuzz:
     name: Fuzz Build & Smoke
@@ -243,42 +366,51 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-
+      - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
 
       - name: Build all fuzz targets
         run: |
-          targets=(
-            decode_diff encode_diff roundtrip invalid_semantics tail_alignment
-            ssse3_strict_diff ssse3_non_strict_schedule
-            avx2_strict_diff avx2_non_strict_schedule avx2_unchecked_contract avx2_partial_write_bounds
-            avx512_strict_diff avx512_non_strict_schedule avx512_encode_diff avx512_partial_write_bounds
-            neon_strict_diff neon_non_strict_schedule neon_encode_diff neon_partial_write_bounds
-            wasm_pshufb_compat wasm_non_strict_schedule wasm_encode_prefix_model wasm_partial_write_model
-          )
-          for t in "${targets[@]}"; do
+          source scripts/lane_defs.sh
+          for t in "${FUZZ_ALL[@]}"; do
             echo "::group::Building fuzz target: $t"
             cargo +nightly fuzz build "$t"
             echo "::endgroup::"
           done
 
-      - name: Smoke run (32 iterations each, x86 targets only)
+      - name: Smoke run (32 iterations, x86 targets)
         run: |
-          targets=(
-            decode_diff encode_diff roundtrip invalid_semantics tail_alignment
-            ssse3_strict_diff ssse3_non_strict_schedule
-            avx2_strict_diff avx2_non_strict_schedule avx2_unchecked_contract avx2_partial_write_bounds
-            avx512_strict_diff avx512_non_strict_schedule avx512_encode_diff avx512_partial_write_bounds
-          )
-          for t in "${targets[@]}"; do
+          source scripts/lane_defs.sh
+          for t in "${FUZZ_X86[@]}"; do
             echo "::group::Fuzz smoke: $t"
             mkdir -p "fuzz/corpus/$t"
             cargo +nightly fuzz run "$t" "fuzz/corpus/$t" -- -runs=32
             echo "::endgroup::"
           done
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Extended proptest (nightly/dispatch only, higher case count)
+  # ─────────────────────────────────────────────────────────────────────
+  proptest-extended:
+    name: Extended Proptest
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: lint-and-test
+    env:
+      PROPTEST_CASES: "5000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Extended proptest
+        run: |
+          cargo test --test sse_decode_tests \
+                     --test avx2_decode_tests \
+                     --test avx512_vbmi_decode_tests \
+                     --test sse_encode_tests \
+                     --test avx2_encode_tests \
+                     --test avx512_vbmi_encode_tests \
+                     --test simd_fuzz_strict \
+                     --test proptest
