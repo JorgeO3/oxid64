@@ -1,3 +1,5 @@
+#![cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+
 use oxid64::engine::models::avx2::{
     non_strict_checks_offset, simd_touched_prefix_before_error_partial,
     simd_touched_prefix_before_error_strict, simd_written_prefix_before_error_partial,
@@ -29,7 +31,6 @@ fn avx2_model_schedule_and_prefix_bounds() {
     assert_eq!(simd_touched_prefix_before_error_strict(456), 340);
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod native {
     use super::{
         non_strict_checks_offset, simd_touched_prefix_before_error_partial,

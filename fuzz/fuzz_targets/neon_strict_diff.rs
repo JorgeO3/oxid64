@@ -1,21 +1,14 @@
 #![no_main]
+#![cfg_attr(not(target_arch = "aarch64"), allow(unused))]
 
 use libfuzzer_sys::fuzz_target;
 
 #[cfg(target_arch = "aarch64")]
-use oxid64::engine::neon::NeonDecoder;
-#[cfg(target_arch = "aarch64")]
-use oxid64::engine::scalar::{decode_base64_fast, encode_base64_fast};
+mod native {
+    use oxid64::engine::neon::NeonDecoder;
+    use oxid64::engine::scalar::{decode_base64_fast, encode_base64_fast};
 
-fuzz_target!(|data: &[u8]| {
-    #[cfg(not(target_arch = "aarch64"))]
-    {
-        let _ = data;
-        return;
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    {
+    pub(super) fn run(data: &[u8]) {
         if !std::arch::is_aarch64_feature_detected!("neon") {
             return;
         }
@@ -46,4 +39,9 @@ fuzz_target!(|data: &[u8]| {
             .decode_to_slice(&bad, &mut simd_out)
             .is_none());
     }
+}
+
+fuzz_target!(|data: &[u8]| {
+    #[cfg(target_arch = "aarch64")]
+    native::run(data);
 });

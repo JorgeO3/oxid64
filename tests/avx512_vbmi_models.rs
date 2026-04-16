@@ -1,3 +1,5 @@
+#![cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+
 use oxid64::engine::models::avx512vbmi::{
     DECODE_DOUBLE_THRESHOLD, DECODE_SINGLE_THRESHOLD, DECODE_TAIL_THRESHOLD,
     DOUBLE_ES256_BLOCK_STARTS, DOUBLE_ES256_INPUT_BYTES, DOUBLE_ES256_OUTPUT_BYTES,
@@ -68,7 +70,6 @@ fn avx512_decode_model_schedule_and_prefix_bounds() {
     );
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod native {
     use super::{non_strict_checks_offset, simd_touched_prefix_before_error};
     use oxid64::engine::DecodeOpts;

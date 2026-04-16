@@ -1,44 +1,35 @@
 #![no_main]
+#![cfg_attr(not(target_arch = "aarch64"), allow(unused))]
 
 use libfuzzer_sys::fuzz_target;
 
 #[cfg(target_arch = "aarch64")]
-use oxid64::engine::neon::NeonDecoder;
-#[cfg(target_arch = "aarch64")]
-use oxid64::engine::scalar::encode_base64_fast;
-#[cfg(target_arch = "aarch64")]
-use oxid64::engine::DecodeOpts;
+mod native {
+    use oxid64::engine::DecodeOpts;
+    use oxid64::engine::neon::NeonDecoder;
+    use oxid64::engine::scalar::encode_base64_fast;
 
-#[cfg(target_arch = "aarch64")]
-fn expected_checked(encoded_len: usize, pos: usize) -> bool {
-    let mut ip = 0usize;
+    fn expected_checked(encoded_len: usize, pos: usize) -> bool {
+        let mut ip = 0usize;
 
-    while encoded_len.saturating_sub(ip) > 256 {
-        if pos >= ip && pos < ip + 256 {
-            return (pos - ip) / 64 == 3;
+        while encoded_len.saturating_sub(ip) > 256 {
+            if pos >= ip && pos < ip + 256 {
+                return (pos - ip) / 64 == 3;
+            }
+            ip += 256;
         }
-        ip += 256;
-    }
 
-    while encoded_len.saturating_sub(ip) > 64 {
-        if pos >= ip && pos < ip + 64 {
-            return true;
+        while encoded_len.saturating_sub(ip) > 64 {
+            if pos >= ip && pos < ip + 64 {
+                return true;
+            }
+            ip += 64;
         }
-        ip += 64;
+
+        true
     }
 
-    true
-}
-
-fuzz_target!(|data: &[u8]| {
-    #[cfg(not(target_arch = "aarch64"))]
-    {
-        let _ = data;
-        return;
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    {
+    pub(super) fn run(data: &[u8]) {
         if !std::arch::is_aarch64_feature_detected!("neon") {
             return;
         }
@@ -66,4 +57,9 @@ fuzz_target!(|data: &[u8]| {
             .decode_to_slice(&bad, &mut out[..raw_len]);
         assert_eq!(got.is_none(), expected_checked(encoded.len(), pos));
     }
+}
+
+fuzz_target!(|data: &[u8]| {
+    #[cfg(target_arch = "aarch64")]
+    native::run(data);
 });

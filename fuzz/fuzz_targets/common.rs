@@ -1,13 +1,85 @@
 #![allow(dead_code)]
 
+use oxid64::engine::scalar::{ScalarDecoder, decode_base64_fast, encode_base64_fast};
+use oxid64::{Base64Decoder, Decoder, decoded_len, encoded_len};
+
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-use oxid64::engine::avx2::Avx2Decoder;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-use oxid64::engine::avx512vbmi::Avx512VbmiDecoder;
-use oxid64::engine::scalar::{decode_base64_fast, encode_base64_fast, ScalarDecoder};
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-use oxid64::engine::ssse3::Ssse3Decoder;
-use oxid64::{decoded_len, encoded_len, Base64Decoder, Decoder};
+mod x86_native {
+    use super::{decode_with_window, encode_with_window};
+    use oxid64::Base64Decoder;
+    use oxid64::engine::avx2::Avx2Decoder;
+    use oxid64::engine::avx512vbmi::Avx512VbmiDecoder;
+    use oxid64::engine::ssse3::Ssse3Decoder;
+
+    pub(super) fn assert_strict_decode_matches_scalar(input: &[u8], expected: &Option<Vec<u8>>) {
+        if std::is_x86_feature_detected!("ssse3") {
+            let dec = Ssse3Decoder::new();
+            assert_eq!(
+                decode_with_window(&dec, input, 1),
+                *expected,
+                "ssse3 strict mismatch"
+            );
+        }
+        if std::is_x86_feature_detected!("avx2") {
+            let dec = Avx2Decoder::new();
+            assert_eq!(
+                decode_with_window(&dec, input, 2),
+                *expected,
+                "avx2 strict mismatch"
+            );
+        }
+        if std::is_x86_feature_detected!("avx512vbmi") {
+            let dec = Avx512VbmiDecoder::new();
+            assert_eq!(
+                decode_with_window(&dec, input, 3),
+                *expected,
+                "avx512 strict mismatch"
+            );
+        }
+    }
+
+    pub(super) fn assert_encode_matches_scalar(input: &[u8], expected: &[u8]) {
+        if std::is_x86_feature_detected!("ssse3") {
+            let dec = Ssse3Decoder::new();
+            assert_eq!(
+                encode_with_window(&dec, input, 1),
+                expected,
+                "ssse3 encode mismatch"
+            );
+        }
+        if std::is_x86_feature_detected!("avx2") {
+            let dec = Avx2Decoder::new();
+            assert_eq!(
+                encode_with_window(&dec, input, 2),
+                expected,
+                "avx2 encode mismatch"
+            );
+        }
+        if std::is_x86_feature_detected!("avx512vbmi") {
+            let dec = Avx512VbmiDecoder::new();
+            assert_eq!(
+                encode_with_window(&dec, input, 3),
+                expected,
+                "avx512 encode mismatch"
+            );
+        }
+    }
+
+    pub(super) fn assert_roundtrip_all(input: &[u8], encoded: &[u8]) {
+        if std::is_x86_feature_detected!("avx2") {
+            let dec = Avx2Decoder::new();
+            assert_eq!(dec.decode(encoded).expect("avx2 decode"), input);
+        }
+        if std::is_x86_feature_detected!("ssse3") {
+            let dec = Ssse3Decoder::new();
+            assert_eq!(dec.decode(encoded).expect("ssse3 decode"), input);
+        }
+        if std::is_x86_feature_detected!("avx512vbmi") {
+            let dec = Avx512VbmiDecoder::new();
+            assert_eq!(dec.decode(encoded).expect("avx512 decode"), input);
+        }
+    }
+}
 
 pub(crate) const MAX_FUZZ_LEN: usize = 4096;
 
@@ -76,34 +148,8 @@ pub(crate) fn assert_strict_decode_matches_scalar(input: &[u8]) {
     assert_eq!(decode_with_window(&scalar, input, 1), expected);
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    {
-        if std::is_x86_feature_detected!("ssse3") {
-            let dec = Ssse3Decoder::new();
-            assert_eq!(
-                decode_with_window(&dec, input, 1),
-                expected,
-                "ssse3 strict mismatch"
-            );
-        }
-        if std::is_x86_feature_detected!("avx2") {
-            let dec = Avx2Decoder::new();
-            assert_eq!(
-                decode_with_window(&dec, input, 2),
-                expected,
-                "avx2 strict mismatch"
-            );
-        }
-        if std::is_x86_feature_detected!("avx512vbmi") {
-            let dec = Avx512VbmiDecoder::new();
-            assert_eq!(
-                decode_with_window(&dec, input, 3),
-                expected,
-                "avx512 strict mismatch"
-            );
-        }
-    }
+    x86_native::assert_strict_decode_matches_scalar(input, &expected);
 }
-
 pub(crate) fn assert_encode_matches_scalar(input: &[u8]) {
     let expected = scalar_encode(input);
 
@@ -112,32 +158,7 @@ pub(crate) fn assert_encode_matches_scalar(input: &[u8]) {
     assert_eq!(encode_with_window(&scalar, input, 1), expected);
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    {
-        if std::is_x86_feature_detected!("ssse3") {
-            let dec = Ssse3Decoder::new();
-            assert_eq!(
-                encode_with_window(&dec, input, 1),
-                expected,
-                "ssse3 encode mismatch"
-            );
-        }
-        if std::is_x86_feature_detected!("avx2") {
-            let dec = Avx2Decoder::new();
-            assert_eq!(
-                encode_with_window(&dec, input, 2),
-                expected,
-                "avx2 encode mismatch"
-            );
-        }
-        if std::is_x86_feature_detected!("avx512vbmi") {
-            let dec = Avx512VbmiDecoder::new();
-            assert_eq!(
-                encode_with_window(&dec, input, 3),
-                expected,
-                "avx512 encode mismatch"
-            );
-        }
-    }
+    x86_native::assert_encode_matches_scalar(input, &expected);
 }
 
 pub(crate) fn assert_roundtrip_all(input: &[u8]) {
@@ -149,18 +170,5 @@ pub(crate) fn assert_roundtrip_all(input: &[u8]) {
     assert_eq!(decoded, input);
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    {
-        if std::is_x86_feature_detected!("avx2") {
-            let dec = Avx2Decoder::new();
-            assert_eq!(dec.decode(&encoded).expect("avx2 decode"), input);
-        }
-        if std::is_x86_feature_detected!("ssse3") {
-            let dec = Ssse3Decoder::new();
-            assert_eq!(dec.decode(&encoded).expect("ssse3 decode"), input);
-        }
-        if std::is_x86_feature_detected!("avx512vbmi") {
-            let dec = Avx512VbmiDecoder::new();
-            assert_eq!(dec.decode(&encoded).expect("avx512 decode"), input);
-        }
-    }
+    x86_native::assert_roundtrip_all(input, &encoded);
 }

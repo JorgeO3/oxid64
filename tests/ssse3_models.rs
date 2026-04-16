@@ -1,3 +1,5 @@
+#![cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+
 use oxid64::engine::models::ssse3::{
     aligned_non_strict_checks_offset, aligned_touched_prefix_before_error,
     aligned_written_prefix_before_error,
@@ -23,11 +25,8 @@ fn ssse3_model_schedule_and_prefix_bounds() {
     assert_eq!(aligned_touched_prefix_before_error(192), 136);
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod native {
-    use super::{
-        aligned_non_strict_checks_offset, aligned_touched_prefix_before_error,
-    };
+    use super::{aligned_non_strict_checks_offset, aligned_touched_prefix_before_error};
     use oxid64::engine::DecodeOpts;
     use oxid64::engine::scalar::encode_base64_fast;
     use oxid64::engine::ssse3::Ssse3Decoder;
