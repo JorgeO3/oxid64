@@ -38,6 +38,59 @@ is deferred to the final phase.
 - Kani: `active` for small helper contracts (`just test-kani`).
 - Fuzz: `active` (`proptest` in `tests/` plus `cargo-fuzz` smoke targets via `just fuzz-smoke-all`).
 
+## Parallel Lane Model
+
+The safety matrix is organized into **lanes** — independent verification jobs
+that can run in parallel with isolated `CARGO_TARGET_DIR` directories. All
+inventories (Kani harnesses, fuzz targets, Miri shards, proptest bins) are
+defined in a single source of truth: `scripts/lane_defs.sh`.
+
+### Lane Categories
+
+| Lane | Tool | Scope |
+|------|------|-------|
+| `nextest` | cargo nextest | All lib + integration tests |
+| `doctest` | cargo test --doc | Doctests |
+| `proptest_extended` | cargo test (PROPTEST_CASES=5000) | x86/NEON proptest bins |
+| `careful` | cargo-careful | lib + tests + doc |
+| `miri_lib` | Miri | --lib |
+| `miri_contracts` | Miri | scalar/common/msan contracts |
+| `miri_x86_models` | Miri | ssse3/avx2/avx512 models |
+| `miri_other_models` | Miri | neon/wasm models |
+| `miri_proptest` | Miri | proptest + simd_fuzz_strict |
+| `miri_x86_integration` | Miri | sse/avx2/avx512 encode+decode |
+| `asan` | AddressSanitizer | lib + tests + doc |
+| `msan` | MemorySanitizer | lib + tests + doc |
+| `kani_core` | Kani | 8 core harnesses |
+| `kani_ssse3` | Kani | 5 SSSE3 harnesses |
+| `kani_avx2` | Kani | 8 AVX2 harnesses |
+| `kani_avx512` | Kani | 6 AVX-512 harnesses |
+| `kani_neon` | Kani | 4 NEON harnesses |
+| `kani_wasm` | Kani | 8 WASM harnesses |
+| `fuzz_build` | cargo-fuzz build | All 24 targets |
+| `fuzz_smoke` | cargo-fuzz run | x86 targets, 32 iterations |
+
+### Path-Based Routing
+
+When `--changed <files>` is passed to `verify_safety.sh`, the script uses
+`affected_backends()` from `lane_defs.sh` to determine which backends changed
+and skips unrelated lanes. Shared-code changes run all lanes.
+
+### Execution Model
+
+- **Phase 1** (serial): `cargo fmt --check` + `cargo clippy`
+- **Phase 2** (serial): nextest + doctests (fast gate)
+- **Phase 3** (parallel lanes): All heavy verification runs as concurrent lanes,
+  throttled by `--max-lanes N` (default: 4). Each lane gets its own
+  `target/verify/<lane_name>` dir and `CARGO_BUILD_JOBS = total_cpus / max_lanes`.
+
+### CI Integration
+
+The CI workflow (`.github/workflows/ci.yml`) maps lanes to GitHub Actions jobs:
+
+- **PR/push**: lint-and-test → careful, miri-lib, miri-contracts, miri-models, asan, msan (parallel after gate)
+- **Nightly/dispatch**: All of the above plus miri-integration, miri-many-seeds, kani-{core,ssse3,avx2,avx512,neon,wasm}, fuzz, proptest-extended
+
 ## Reproducible Commands (Current)
 
 - Full test suite:
@@ -76,11 +129,16 @@ is deferred to the final phase.
   - `just safety-phase0`
 - Extended SIMD differential fuzz pass:
   - `PROPTEST_CASES=5000 cargo test --test sse_decode_tests --test avx2_decode_tests --test sse_encode_tests --test simd_fuzz_strict`
-- Safety matrix (best effort):
+- Safety matrix (best effort, parallel lanes):
   - `just verify-safety`
   - `just verify-safety fuzz_cases=200`
+  - `just verify-safety max_lanes=8 jobs=4`
 - Safety matrix (strict gate):
   - `just verify-safety-strict`
+- Safety matrix (dry-run, shows plan without executing):
+  - `just verify-safety-dry-run`
+- Safety matrix (with path-based routing):
+  - `just verify-safety-routed`
 
 ### Miri invocation
 
