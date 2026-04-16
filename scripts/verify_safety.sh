@@ -2,16 +2,22 @@
 # verify_safety.sh — Swiss-Cheese safety verification matrix for oxid64.
 #
 # Two modes:
-#   --mode smoke   Fast gate (~2 min): core tests, clippy, cargo-careful, Miri lib,
-#                  one Kani harness per backend, one fuzz-build check.
-#   --mode full    Complete matrix (~30-60 min): all layers including full Miri sweep,
-#                  all Kani proofs, ASan, MSan, fuzz-build + smoke runs.
+#   --mode smoke   Fast gate (~2 min): lint, nextest, cargo-careful --lib,
+#                  Miri lib + contracts + models, one Kani per backend, fuzz build smoke.
+#   --mode full    Complete matrix: all layers including sharded Miri, all Kani proofs,
+#                  ASan, MSan, extended proptest, fuzz build + smoke runs.
+#                  Heavy lanes run in parallel with isolated CARGO_TARGET_DIR.
 #
 # Flags:
-#   --strict       Exit on first missing tool instead of warning.
-#   --fuzz-cases N Proptest case count (default 5000 for full, 200 for smoke).
-#   --fuzz-runs N  Fuzz smoke run count (default 64 for full, 8 for smoke).
-#   --mode MODE    "smoke" or "full" (default: full).
+#   --strict        Exit on first missing tool instead of warning.
+#   --fuzz-cases N  Proptest case count (default 5000 for full, 200 for smoke).
+#   --fuzz-runs N   Fuzz smoke run count (default 64 for full, 8 for smoke).
+#   --mode MODE     "smoke" or "full" (default: full).
+#   --max-lanes N   Max parallel heavy lanes (default: 4).
+#   --jobs N        CARGO_BUILD_JOBS per lane (default: auto-calculated).
+#   --changed FILE  File with list of changed paths for routing (one per line).
+#                   If omitted, all lanes run.
+#   --dry-run       Show which lanes would run, then exit.
 #
 # Environment:
 #   Requires nightly toolchain with miri component.
@@ -19,32 +25,47 @@
 #
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lane_defs.sh
+source "${SCRIPT_DIR}/lane_defs.sh"
+
 # --- Defaults ----------------------------------------------------------------
 MODE="full"
 STRICT=0
 FUZZ_CASES=""
 FUZZ_RUNS=""
+MAX_LANES=4
+CARGO_JOBS=""
+CHANGED_FILE=""
+DRY_RUN=0
 PASS_COUNT=0
 SKIP_COUNT=0
 FAIL_COUNT=0
+LANE_PIDS=()
+LANE_NAMES=()
+LANE_LOGS=()
 
 # --- Argument parsing --------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --strict)      STRICT=1;       shift ;;
-    --mode)        MODE="$2";      shift 2 ;;
-    --fuzz-cases)  FUZZ_CASES="$2"; shift 2 ;;
-    --fuzz-runs)   FUZZ_RUNS="$2";  shift 2 ;;
+    --strict)      STRICT=1;          shift ;;
+    --mode)        MODE="$2";         shift 2 ;;
+    --fuzz-cases)  FUZZ_CASES="$2";   shift 2 ;;
+    --fuzz-runs)   FUZZ_RUNS="$2";    shift 2 ;;
+    --max-lanes)   MAX_LANES="$2";    shift 2 ;;
+    --jobs)        CARGO_JOBS="$2";   shift 2 ;;
+    --changed)     CHANGED_FILE="$2"; shift 2 ;;
+    --dry-run)     DRY_RUN=1;         shift ;;
     *)
       echo "Unknown arg: $1" >&2
-      echo "Usage: $0 [--mode smoke|full] [--strict] [--fuzz-cases N] [--fuzz-runs N]" >&2
+      echo "Usage: $0 [--mode smoke|full] [--strict] [--fuzz-cases N] [--fuzz-runs N] [--max-lanes N] [--jobs N] [--changed FILE] [--dry-run]" >&2
       exit 2
       ;;
   esac
 done
 
 # Normalize name=value forms from task runners.
-for var in FUZZ_CASES FUZZ_RUNS MODE; do
+for var in FUZZ_CASES FUZZ_RUNS MODE MAX_LANES CARGO_JOBS; do
   val="${!var}"
   if [[ "$val" == *=* ]]; then
     eval "$var=\"${val##*=}\""
@@ -67,12 +88,33 @@ if [[ -z "$FUZZ_RUNS" ]]; then
   [[ "$MODE" == "smoke" ]] && FUZZ_RUNS=8 || FUZZ_RUNS=64
 fi
 
-for var in FUZZ_CASES FUZZ_RUNS; do
+for var in FUZZ_CASES FUZZ_RUNS MAX_LANES; do
   if ! [[ "${!var}" =~ ^[0-9]+$ ]]; then
     echo "ERROR: $var must be an integer, got '${!var}'" >&2
     exit 2
   fi
 done
+
+# Auto-calculate jobs per lane if not specified.
+if [[ -z "$CARGO_JOBS" ]]; then
+  TOTAL_CPUS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8)"
+  CARGO_JOBS=$(( TOTAL_CPUS / MAX_LANES ))
+  [[ "$CARGO_JOBS" -lt 1 ]] && CARGO_JOBS=1
+fi
+
+# Base target dir for lane isolation.
+VERIFY_TARGET_BASE="${CARGO_TARGET_DIR:-target}/verify"
+
+# --- Routing -----------------------------------------------------------------
+ACTIVE_BACKENDS="all"
+if [[ -n "$CHANGED_FILE" && -f "$CHANGED_FILE" ]]; then
+  ACTIVE_BACKENDS="$(affected_backends < "$CHANGED_FILE")"
+fi
+
+backend_active() {
+  local backend="$1"
+  [[ "$ACTIVE_BACKENDS" == "all" ]] || [[ " $ACTIVE_BACKENDS " == *" $backend "* ]]
+}
 
 # --- Helpers -----------------------------------------------------------------
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -108,14 +150,233 @@ layer_pass() {
   echo "  ✓ $1"
 }
 
+# --- Lane execution helpers --------------------------------------------------
+# Run a function in the background as a lane with its own CARGO_TARGET_DIR and log.
+# Usage: launch_lane <lane_name> <function_name> [args...]
+launch_lane() {
+  local name="$1"; shift
+  local func="$1"; shift
+  local log_file
+  log_file="$(mktemp -t "oxid64-${name}-XXXXXX.log")"
+
+  # Wait if we're at max parallel lanes.
+  while [[ ${#LANE_PIDS[@]} -ge $MAX_LANES ]]; do
+    wait_any_lane
+  done
+
+  (
+    export CARGO_TARGET_DIR="${VERIFY_TARGET_BASE}/${name}"
+    export CARGO_BUILD_JOBS="$CARGO_JOBS"
+    "$func" "$@"
+  ) > "$log_file" 2>&1 &
+
+  LANE_PIDS+=($!)
+  LANE_NAMES+=("$name")
+  LANE_LOGS+=("$log_file")
+  echo "  ▸ launched lane: $name (pid $!, jobs=$CARGO_JOBS, target=$VERIFY_TARGET_BASE/$name)"
+}
+
+# Wait for any one lane to finish and report its result.
+wait_any_lane() {
+  if [[ ${#LANE_PIDS[@]} -eq 0 ]]; then
+    return
+  fi
+
+  # Wait for the first one that finishes.
+  local idx=-1
+  while true; do
+    for i in "${!LANE_PIDS[@]}"; do
+      if ! kill -0 "${LANE_PIDS[$i]}" 2>/dev/null; then
+        idx=$i
+        break 2
+      fi
+    done
+    sleep 0.5
+  done
+
+  local pid="${LANE_PIDS[$idx]}"
+  local name="${LANE_NAMES[$idx]}"
+  local log="${LANE_LOGS[$idx]}"
+  wait "$pid" && {
+    layer_pass "lane: $name"
+  } || {
+    echo "  ✗ lane FAILED: $name (see $log)" >&2
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  }
+
+  # Remove from tracking arrays.
+  unset 'LANE_PIDS[idx]'
+  unset 'LANE_NAMES[idx]'
+  unset 'LANE_LOGS[idx]'
+  LANE_PIDS=("${LANE_PIDS[@]}")
+  LANE_NAMES=("${LANE_NAMES[@]}")
+  LANE_LOGS=("${LANE_LOGS[@]}")
+}
+
+# Wait for all remaining lanes.
+wait_all_lanes() {
+  while [[ ${#LANE_PIDS[@]} -gt 0 ]]; do
+    wait_any_lane
+  done
+}
+
+# --- Lane functions ----------------------------------------------------------
+# Each lane function runs in a subshell with its own CARGO_TARGET_DIR.
+
+lane_nextest() {
+  echo "=== nextest: --lib --tests ==="
+  cargo nextest run --lib --tests
+}
+
+lane_doctest() {
+  echo "=== doctests ==="
+  cargo test --doc
+}
+
+lane_proptest_extended() {
+  echo "=== proptest extended (PROPTEST_CASES=${FUZZ_CASES}) ==="
+  env PROPTEST_CASES="${FUZZ_CASES}" cargo test "${PROPTEST_X86_BINS[@]}"
+}
+
+lane_careful() {
+  echo "=== cargo-careful ==="
+  if [[ "$MODE" == "smoke" ]]; then
+    cargo +nightly careful test --lib
+  else
+    cargo +nightly careful test --lib --tests
+    cargo +nightly careful test --doc
+  fi
+}
+
+lane_miri_lib() {
+  local flags="-Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation"
+  echo "=== Miri: --lib ==="
+  MIRIFLAGS="$flags" cargo +nightly miri test --lib
+  if [[ "$MODE" == "full" ]]; then
+    echo "=== Miri: many-seeds --lib ==="
+    MIRIFLAGS="$flags -Zmiri-many-seeds=0..4" cargo +nightly miri test --lib
+  fi
+}
+
+lane_miri_contracts() {
+  local flags="-Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation"
+  echo "=== Miri: contracts ==="
+  MIRIFLAGS="$flags" cargo +nightly miri test "${MIRI_SHARD_CONTRACTS[@]}"
+}
+
+lane_miri_x86_models() {
+  local flags="-Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation"
+  echo "=== Miri: x86 models ==="
+  MIRIFLAGS="$flags" cargo +nightly miri test "${MIRI_SHARD_X86_MODELS[@]}"
+}
+
+lane_miri_other_models() {
+  local flags="-Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation"
+  echo "=== Miri: NEON + WASM models ==="
+  MIRIFLAGS="$flags" cargo +nightly miri test "${MIRI_SHARD_OTHER_MODELS[@]}"
+}
+
+lane_miri_proptest() {
+  local flags="-Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation"
+  echo "=== Miri: proptest bins ==="
+  MIRIFLAGS="$flags" cargo +nightly miri test "${MIRI_SHARD_PROPTEST[@]}"
+}
+
+lane_miri_x86_integration() {
+  local flags="-Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation"
+  echo "=== Miri: x86 integration tests ==="
+  MIRIFLAGS="$flags" cargo +nightly miri test "${MIRI_SHARD_X86_INTEGRATION[@]}"
+}
+
+lane_asan() {
+  echo "=== AddressSanitizer ==="
+  ASAN_OPTIONS=detect_leaks=0 RUSTFLAGS="-Zsanitizer=address" \
+  RUSTDOCFLAGS="-Zsanitizer=address" \
+    cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --lib --tests
+  if [[ "$MODE" == "full" ]]; then
+    ASAN_OPTIONS=detect_leaks=0 RUSTFLAGS="-Zsanitizer=address" \
+    RUSTDOCFLAGS="-Zsanitizer=address" \
+      cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --doc
+  fi
+}
+
+lane_msan() {
+  echo "=== MemorySanitizer ==="
+  MSAN_OPTIONS="halt_on_error=1,exit_code=86,poison_in_dtor=1" \
+  RUSTFLAGS="-Zsanitizer=memory" RUSTDOCFLAGS="-Zsanitizer=memory" \
+    cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --lib --tests
+  if [[ "$MODE" == "full" ]]; then
+    MSAN_OPTIONS="halt_on_error=1,exit_code=86,poison_in_dtor=1" \
+    RUSTFLAGS="-Zsanitizer=memory" RUSTDOCFLAGS="-Zsanitizer=memory" \
+      cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --doc
+  fi
+}
+
+lane_kani_family() {
+  local family_name="$1"; shift
+  local harnesses=("$@")
+  echo "=== Kani: $family_name (${#harnesses[@]} harnesses) ==="
+  for h in "${harnesses[@]}"; do
+    echo "  proving: $h"
+    cargo kani --default-unwind 8 --harness "$h"
+  done
+}
+
+lane_fuzz_build() {
+  local targets=("$@")
+  echo "=== fuzz build (${#targets[@]} targets) ==="
+  for t in "${targets[@]}"; do
+    cargo +nightly fuzz build "$t"
+  done
+}
+
+lane_fuzz_smoke() {
+  local runs="$1"; shift
+  local targets=("$@")
+  echo "=== fuzz smoke (${#targets[@]} targets, $runs runs each) ==="
+  for t in "${targets[@]}"; do
+    mkdir -p "fuzz/corpus/${t}"
+    cargo +nightly fuzz run "$t" "fuzz/corpus/${t}" -- -runs="${runs}" || {
+      echo "WARN: fuzz target '$t' smoke run failed (may require native arch)" >&2
+    }
+  done
+}
+
 # --- Banner ------------------------------------------------------------------
 echo "╔══════════════════════════════════════════════╗"
 echo "║ oxid64 Safety Verification (Swiss-Cheese)   ║"
 echo "╚══════════════════════════════════════════════╝"
 echo "MODE=${MODE}  STRICT=${STRICT}  FUZZ_CASES=${FUZZ_CASES}  FUZZ_RUNS=${FUZZ_RUNS}"
+echo "MAX_LANES=${MAX_LANES}  JOBS/LANE=${CARGO_JOBS}  BACKENDS=${ACTIVE_BACKENDS}"
+
+# --- Dry run -----------------------------------------------------------------
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo
+  echo "Dry run — lanes that would execute:"
+  echo "  Always: lint, nextest, doctest"
+  if [[ "$MODE" == "full" ]]; then
+    echo "  Always (full): proptest-extended, careful"
+    echo "  Miri shards: lib, contracts"
+    backend_active ssse3 && echo "  Miri shards: x86-models, x86-integration"
+    backend_active neon || backend_active wasm && echo "  Miri shards: other-models"
+    [[ "$MODE" == "full" ]] && echo "  Miri shards: proptest"
+    echo "  Sanitizers: asan, msan"
+    echo "  Kani families:"
+    echo "    core (${#KANI_CORE[@]} harnesses)"
+    backend_active ssse3  && echo "    ssse3 (${#KANI_SSSE3[@]})"
+    backend_active avx2   && echo "    avx2 (${#KANI_AVX2[@]})"
+    backend_active avx512 && echo "    avx512 (${#KANI_AVX512[@]})"
+    backend_active neon   && echo "    neon (${#KANI_NEON[@]})"
+    backend_active wasm   && echo "    wasm (${#KANI_WASM[@]})"
+    echo "  Fuzz: build + smoke all affected targets"
+  else
+    echo "  Smoke: careful --lib, Miri (lib + contracts + models), Kani smoke, fuzz build smoke"
+  fi
+  exit 0
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Layer 1: Lint + Format check
+# Phase 1: Lint + Format (serial, fast, must pass before anything else)
 # ═══════════════════════════════════════════════════════════════════════════════
 layer_start "Lint & Format"
 cargo fmt --all -- --check
@@ -124,232 +385,125 @@ cargo clippy --all-targets --all-features -- -D warnings
 layer_pass "cargo clippy"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Layer 2: Core tests (all backends, all integration tests, doctests)
+# Phase 2: Core tests (serial, fast gate)
 # ═══════════════════════════════════════════════════════════════════════════════
-layer_start "Core Tests"
-cargo test
-layer_pass "cargo test (all)"
+layer_start "Core Tests (nextest)"
+if have cargo-nextest; then
+  cargo nextest run --lib --tests
+  layer_pass "cargo nextest run --lib --tests"
+else
+  cargo test --lib --tests
+  layer_pass "cargo test --lib --tests (nextest not available)"
+fi
+
+layer_start "Doctests"
+cargo test --doc
+layer_pass "cargo test --doc"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Layer 3: Proptest / differential fuzz (x86 backends)
+# Phase 3: Heavy lanes (parallel with isolated CARGO_TARGET_DIR)
 # ═══════════════════════════════════════════════════════════════════════════════
-layer_start "Proptest Differential Fuzz"
-env PROPTEST_CASES="${FUZZ_CASES}" cargo test \
-  --test sse_decode_tests \
-  --test avx2_decode_tests \
-  --test avx512_vbmi_decode_tests \
-  --test sse_encode_tests \
-  --test avx2_encode_tests \
-  --test avx512_vbmi_encode_tests \
-  --test simd_fuzz_strict \
-  --test proptest
-layer_pass "proptest differential (${FUZZ_CASES} cases)"
+layer_start "Parallel Verification Lanes"
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Layer 4: cargo-careful (overflow/UB hardening in debug builds)
-# ═══════════════════════════════════════════════════════════════════════════════
-layer_start "cargo-careful"
+# --- cargo-careful ---
 if have cargo-careful || cargo +nightly careful --version >/dev/null 2>&1; then
-  if [[ "$MODE" == "smoke" ]]; then
-    cargo +nightly careful test --lib
-    layer_pass "cargo-careful --lib (smoke)"
-  else
-    cargo +nightly careful test --lib --tests
-    cargo +nightly careful test --doc
-    layer_pass "cargo-careful --lib --tests --doc (full)"
-  fi
+  launch_lane careful lane_careful
 else
   warn_or_fail "cargo-careful not installed (cargo +nightly install cargo-careful)." || true
 fi
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Layer 5: Miri (strict provenance + symbolic alignment)
-# ═══════════════════════════════════════════════════════════════════════════════
-MIRI_FLAGS="-Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation"
+# --- Extended proptest (full only) ---
+if [[ "$MODE" == "full" ]]; then
+  launch_lane proptest-ext lane_proptest_extended
+fi
 
-layer_start "Miri"
+# --- Miri shards ---
 if have_miri; then
-  if [[ "$MODE" == "smoke" ]]; then
-    # Smoke: lib + scalar contracts + model tests only (fast).
-    MIRIFLAGS="$MIRI_FLAGS" cargo +nightly miri test --lib
-    layer_pass "Miri --lib"
-    MIRIFLAGS="$MIRI_FLAGS" cargo +nightly miri test --test scalar_contracts
-    layer_pass "Miri scalar_contracts"
-    MIRIFLAGS="$MIRI_FLAGS" cargo +nightly miri test --test common_contracts
-    layer_pass "Miri common_contracts"
-    MIRIFLAGS="$MIRI_FLAGS" cargo +nightly miri test \
-      --test ssse3_models --test avx2_models --test avx512_vbmi_models \
-      --test neon_models --test wasm_simd128_models
-    layer_pass "Miri model tests (all backends)"
+  launch_lane miri-lib lane_miri_lib
+  launch_lane miri-contracts lane_miri_contracts
+
+  if [[ "$MODE" == "full" ]]; then
+    if backend_active ssse3 || backend_active avx2 || backend_active avx512; then
+      launch_lane miri-x86-models lane_miri_x86_models
+      launch_lane miri-x86-integration lane_miri_x86_integration
+    fi
+    if backend_active neon || backend_active wasm; then
+      launch_lane miri-other-models lane_miri_other_models
+    fi
+    launch_lane miri-proptest lane_miri_proptest
   else
-    # Full: entire test suite under Miri.
-    MIRIFLAGS="$MIRI_FLAGS" cargo +nightly miri test
-    layer_pass "Miri full test suite"
-    # Many-seeds exploration for additional scheduling coverage.
-    MIRIFLAGS="$MIRI_FLAGS -Zmiri-many-seeds=0..4" cargo +nightly miri test --lib
-    layer_pass "Miri many-seeds (lib)"
+    # Smoke: just models (fast).
+    launch_lane miri-x86-models lane_miri_x86_models
+    launch_lane miri-other-models lane_miri_other_models
   fi
 else
   warn_or_fail "cargo-miri not installed (rustup component add miri --toolchain nightly)." || true
 fi
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Layer 6: AddressSanitizer
-# ═══════════════════════════════════════════════════════════════════════════════
-layer_start "AddressSanitizer"
+# --- Sanitizers ---
 if have clang; then
-  if [[ "$MODE" == "smoke" ]]; then
-    ASAN_OPTIONS=detect_leaks=0 RUSTFLAGS="-Zsanitizer=address" \
-    RUSTDOCFLAGS="-Zsanitizer=address" \
-      cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --lib --tests
-    layer_pass "ASan --lib --tests (smoke)"
-  else
-    ASAN_OPTIONS=detect_leaks=0 RUSTFLAGS="-Zsanitizer=address" \
-    RUSTDOCFLAGS="-Zsanitizer=address" \
-      cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --lib --tests
-    ASAN_OPTIONS=detect_leaks=0 RUSTFLAGS="-Zsanitizer=address" \
-    RUSTDOCFLAGS="-Zsanitizer=address" \
-      cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --doc
-    layer_pass "ASan --lib --tests --doc (full)"
-  fi
+  launch_lane asan lane_asan
+  launch_lane msan lane_msan
 else
-  warn_or_fail "clang not found; ASan requires clang for -Zbuild-std." || true
+  warn_or_fail "clang not found; ASan/MSan require clang for -Zbuild-std." || true
 fi
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Layer 7: MemorySanitizer
-# ═══════════════════════════════════════════════════════════════════════════════
-layer_start "MemorySanitizer"
-if have clang; then
-  if [[ "$MODE" == "smoke" ]]; then
-    MSAN_OPTIONS="halt_on_error=1,exit_code=86,poison_in_dtor=1" \
-    RUSTFLAGS="-Zsanitizer=memory" RUSTDOCFLAGS="-Zsanitizer=memory" \
-      cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --lib --tests
-    layer_pass "MSan --lib --tests (smoke)"
-  else
-    MSAN_OPTIONS="halt_on_error=1,exit_code=86,poison_in_dtor=1" \
-    RUSTFLAGS="-Zsanitizer=memory" RUSTDOCFLAGS="-Zsanitizer=memory" \
-      cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --lib --tests
-    MSAN_OPTIONS="halt_on_error=1,exit_code=86,poison_in_dtor=1" \
-    RUSTFLAGS="-Zsanitizer=memory" RUSTDOCFLAGS="-Zsanitizer=memory" \
-      cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --doc
-    layer_pass "MSan --lib --tests --doc (full)"
-  fi
-else
-  warn_or_fail "clang not found; MSan requires clang for -Zbuild-std." || true
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Layer 8: Kani formal verification proofs
-# ═══════════════════════════════════════════════════════════════════════════════
-layer_start "Kani Proofs"
+# --- Kani ---
 if have_kani; then
   if [[ "$MODE" == "smoke" ]]; then
-    # One harness per backend family as smoke signal.
-    cargo kani --default-unwind 8 --harness remaining_matches_pointer_delta_within_allocation
-    layer_pass "Kani smoke: core helpers"
-    cargo kani --default-unwind 8 --harness ssse3_ds64_store_offsets_fit_guarded_output
-    layer_pass "Kani smoke: SSSE3"
-    cargo kani --default-unwind 8 --harness avx2_ds128_store_offsets_fit_guarded_output
-    layer_pass "Kani smoke: AVX2"
-    cargo kani --default-unwind 8 --harness avx512_ds256_store_offsets_fit_guarded_output
-    layer_pass "Kani smoke: AVX-512"
-    cargo kani --default-unwind 8 --harness wasm_ds64_store_offsets_fit_guarded_output
-    layer_pass "Kani smoke: WASM"
-    cargo kani --default-unwind 8 --harness neon_non_strict_schedule_model_matches_documented_lanes
-    layer_pass "Kani smoke: NEON"
+    launch_lane kani-smoke lane_kani_family smoke "${KANI_SMOKE[@]}"
   else
-    # Full: run every explicit harness from the Justfile.
-    local_harnesses=(
-      remaining_matches_pointer_delta_within_allocation
-      can_read_and_can_write_agree_with_remaining
-      safe_in_end_for_4_within_allocation
-      safe_in_end_for_16_within_allocation
-      guard_helpers_imply_required_io_room
-      prepare_decode_output_matches_decoded_len_contract
-      decoded_and_encoded_lengths_stay_bounded_in_small_domain
-      decode_offsets_monotonic_and_dispatch_contracts_hold
-      ssse3_ds64_store_offsets_fit_guarded_output
-      ssse3_ds64_double_store_offsets_fit_guarded_output
-      ssse3_tail16_store_fits_guarded_output
-      ssse3_non_strict_schedule_model_matches_documented_lanes
-      ssse3_written_prefix_model_is_bounded_by_decoded_output
-      avx2_ds128_store_offsets_fit_guarded_output
-      avx2_ds128_double_store_offsets_fit_guarded_output
-      avx2_ds128_triple_store_offsets_fit_guarded_output
-      avx2_tail16_store_fits_guarded_output
-      avx2_non_strict_schedule_model_matches_documented_lanes
-      avx2_strict_written_prefix_model_is_bounded_by_decoded_output
-      avx2_partial_written_prefix_model_is_bounded_by_decoded_output
-      avx2_unchecked_preflight_matches_documented_contract
-      avx512_ds256_store_offsets_fit_guarded_output
-      avx512_ds256_double_store_offsets_fit_guarded_output
-      avx512_non_strict_schedule_model_matches_documented_lanes
-      avx512_written_prefix_model_is_bounded_by_decoded_output
-      avx512_encode_schedule_is_contiguous_without_gaps
-      avx512_encode_required_input_matches_farthest_load
-      neon_non_strict_schedule_model_matches_documented_lanes
-      neon_written_prefix_model_is_bounded_by_decoded_output
-      neon_encode_prefix_consumes_only_full_blocks
-      neon_encode_required_input_matches_block_boundaries
-      wasm_ds64_store_offsets_fit_guarded_output
-      wasm_ds64_double_store_offsets_fit_guarded_output
-      wasm_tail16_store_fits_guarded_output
-      wasm_non_strict_schedule_model_matches_documented_lanes
-      wasm_written_prefix_model_is_bounded_by_decoded_output
-      wasm_pshufb_model_matches_low_nibble_spec
-      wasm_encode_prefix_consumes_only_full_blocks
-      wasm_encode_required_input_matches_block_boundaries
-    )
-    for h in "${local_harnesses[@]}"; do
-      cargo kani --default-unwind 8 --harness "$h"
-    done
-    layer_pass "Kani full: ${#local_harnesses[@]} harnesses verified"
+    # Full: launch one lane per backend family for parallel proving.
+    launch_lane kani-core lane_kani_family core "${KANI_CORE[@]}"
+    backend_active ssse3  && launch_lane kani-ssse3  lane_kani_family ssse3  "${KANI_SSSE3[@]}"
+    backend_active avx2   && launch_lane kani-avx2   lane_kani_family avx2   "${KANI_AVX2[@]}"
+    backend_active avx512 && launch_lane kani-avx512  lane_kani_family avx512  "${KANI_AVX512[@]}"
+    backend_active neon   && launch_lane kani-neon   lane_kani_family neon   "${KANI_NEON[@]}"
+    backend_active wasm   && launch_lane kani-wasm   lane_kani_family wasm   "${KANI_WASM[@]}"
   fi
 else
   warn_or_fail "cargo-kani not installed." || true
 fi
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Layer 9: cargo-fuzz build + smoke run
-# ═══════════════════════════════════════════════════════════════════════════════
-layer_start "cargo-fuzz"
+# --- Fuzz ---
 if have_fuzz; then
-  # List of all fuzz targets (from Justfile).
-  FUZZ_TARGETS=(
-    decode_diff encode_diff roundtrip invalid_semantics tail_alignment
-    ssse3_strict_diff ssse3_non_strict_schedule
-    avx2_strict_diff avx2_non_strict_schedule avx2_unchecked_contract avx2_partial_write_bounds
-    avx512_strict_diff avx512_non_strict_schedule avx512_encode_diff avx512_partial_write_bounds
-    neon_strict_diff neon_non_strict_schedule neon_encode_diff neon_partial_write_bounds
-    wasm_pshufb_compat wasm_non_strict_schedule wasm_encode_prefix_model wasm_partial_write_model
-  )
-
   if [[ "$MODE" == "smoke" ]]; then
-    # Smoke: just build-check a few representative targets.
-    for t in decode_diff roundtrip ssse3_strict_diff avx2_strict_diff; do
-      cargo +nightly fuzz build "$t"
-    done
-    layer_pass "fuzz build smoke (4 targets)"
+    launch_lane fuzz-build-smoke lane_fuzz_build "${FUZZ_SMOKE[@]}"
   else
-    # Full: build all, then smoke-run each.
-    for t in "${FUZZ_TARGETS[@]}"; do
-      cargo +nightly fuzz build "$t"
-    done
-    layer_pass "fuzz build all (${#FUZZ_TARGETS[@]} targets)"
+    # Build all affected targets, then smoke-run.
+    local_fuzz_targets=()
+    local_fuzz_targets+=("${FUZZ_COMMON[@]}")
+    backend_active ssse3  && local_fuzz_targets+=("${FUZZ_SSSE3[@]}")
+    backend_active avx2   && local_fuzz_targets+=("${FUZZ_AVX2[@]}")
+    backend_active avx512 && local_fuzz_targets+=("${FUZZ_AVX512[@]}")
+    backend_active neon   && local_fuzz_targets+=("${FUZZ_NEON[@]}")
+    backend_active wasm   && local_fuzz_targets+=("${FUZZ_WASM[@]}")
 
-    for t in "${FUZZ_TARGETS[@]}"; do
-      # Ensure corpus directory exists.
-      mkdir -p "fuzz/corpus/${t}"
-      cargo +nightly fuzz run "$t" "fuzz/corpus/${t}" -- -runs="${FUZZ_RUNS}" || {
-        echo "WARN: fuzz target '$t' smoke run failed (may require native arch)" >&2
-      }
-    done
-    layer_pass "fuzz smoke run all (${FUZZ_RUNS} runs each)"
+    # Fuzz build and smoke share a target dir to reuse compilation.
+    launch_lane fuzz-full bash -c "
+      source '${SCRIPT_DIR}/lane_defs.sh'
+      targets=(${local_fuzz_targets[*]})
+      echo '=== fuzz build (\${#targets[@]} targets) ==='
+      for t in \"\${targets[@]}\"; do
+        cargo +nightly fuzz build \"\$t\"
+      done
+      echo '=== fuzz smoke (\${#targets[@]} targets, ${FUZZ_RUNS} runs) ==='
+      for t in \"\${targets[@]}\"; do
+        mkdir -p \"fuzz/corpus/\${t}\"
+        cargo +nightly fuzz run \"\$t\" \"fuzz/corpus/\${t}\" -- -runs=${FUZZ_RUNS} || {
+          echo \"WARN: fuzz target '\$t' smoke run failed (may require native arch)\" >&2
+        }
+      done
+    "
   fi
 else
   warn_or_fail "cargo-fuzz not installed (cargo +nightly install cargo-fuzz)." || true
 fi
+
+# --- Wait for all lanes to finish ---
+echo
+echo "  ⏳ waiting for ${#LANE_PIDS[@]} lane(s)..."
+wait_all_lanes
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Summary
@@ -358,14 +512,15 @@ echo
 echo "╔══════════════════════════════════════════════╗"
 echo "║ Verification Summary                        ║"
 echo "╚══════════════════════════════════════════════╝"
-echo "  Mode:    ${MODE}"
-echo "  Passed:  ${PASS_COUNT}"
-echo "  Skipped: ${SKIP_COUNT}"
-echo "  Failed:  ${FAIL_COUNT}"
+echo "  Mode:     ${MODE}"
+echo "  Backends: ${ACTIVE_BACKENDS}"
+echo "  Passed:   ${PASS_COUNT}"
+echo "  Skipped:  ${SKIP_COUNT}"
+echo "  Failed:   ${FAIL_COUNT}"
 
 if [[ "$FAIL_COUNT" -gt 0 ]]; then
   echo
-  echo "RESULT: FAILED (${FAIL_COUNT} layer(s) failed)"
+  echo "RESULT: FAILED (${FAIL_COUNT} lane(s) failed)"
   exit 1
 fi
 

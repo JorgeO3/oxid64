@@ -9,30 +9,30 @@ build-c:
 clean-c:
 	cd Turbo-Base64 && make clean
 
-# Run tests using cargo nextest, linking the C library
-test: build-c
+# Run tests using cargo nextest
+test:
 	cargo nextest run
 
 # Phase 2: run cargo-careful for lib/tests/doctests.
-test-careful: build-c
+test-careful:
 	cargo +nightly careful test --lib --tests
 	cargo +nightly careful test --doc
 
 # Native AArch64/ARMv8 only: run NEON integration tests under cargo-careful.
-test-careful-neon: build-c
+test-careful-neon:
 	cargo +nightly careful test --test neon_decode_tests --test neon_encode_tests
 
 # Native AArch64/ARMv8 only: quick cargo-careful smoke for NEON.
-test-careful-neon-smoke: build-c
+test-careful-neon-smoke:
 	cargo +nightly careful test --test neon_decode_tests test_neon_decode_valid_padding_at_simd_block_boundaries -- --exact
 	cargo +nightly careful test --test neon_encode_tests test_neon_encode_boundary_lengths_match_scalar -- --exact
 
 # WASM SIMD128 runtime tests via wasmtime (compile with +simd128).
-test-wasm-runtime: build-c
+test-wasm-runtime:
 	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." RUSTFLAGS="-C target-feature=+simd128" cargo test --target wasm32-wasip1 --test wasm_simd128_decode_tests --test wasm_simd128_encode_tests
 
 # Quick WASM SIMD128 runtime smoke via wasmtime.
-test-wasm-runtime-smoke: build-c
+test-wasm-runtime-smoke:
 	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." RUSTFLAGS="-C target-feature=+simd128" cargo test --target wasm32-wasip1 --test wasm_simd128_decode_tests test_wasm_decode_valid_alphabet_regression_for_simd -- --exact
 	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." RUSTFLAGS="-C target-feature=+simd128" cargo test --target wasm32-wasip1 --test wasm_simd128_encode_tests test_wasm_encode_boundary_lengths_match_scalar -- --exact
 
@@ -312,7 +312,7 @@ fuzz-smoke-wasm runs='32':
 	bash -ceu 'runs="{{runs}}"; runs="${runs##*=}"; cargo +nightly fuzz run wasm_pshufb_compat fuzz/corpus/wasm_pshufb_compat -- -runs="${runs}"; cargo +nightly fuzz run wasm_non_strict_schedule fuzz/corpus/wasm_non_strict_schedule -- -runs="${runs}"; cargo +nightly fuzz run wasm_encode_prefix_model fuzz/corpus/wasm_encode_prefix_model -- -runs="${runs}"; cargo +nightly fuzz run wasm_partial_write_model fuzz/corpus/wasm_partial_write_model -- -runs="${runs}"'
 
 # Native AArch64/ARMv8 server checklist for the NEON backend.
-verify-neon-aarch64 runs='32': build-c
+verify-neon-aarch64 runs='32':
 	cargo test --test neon_decode_tests --test neon_encode_tests
 	just test-careful-neon
 	just test-asan-neon
@@ -323,7 +323,7 @@ verify-neon-aarch64 runs='32': build-c
 	just fuzz-smoke-neon runs={{runs}}
 
 # Native AArch64/ARMv8 quick smoke across the NEON safety stack.
-verify-neon-aarch64-smoke runs='8': build-c
+verify-neon-aarch64-smoke runs='8':
 	cargo test --test neon_decode_tests test_neon_decode_valid_padding_at_simd_block_boundaries -- --exact
 	cargo test --test neon_encode_tests test_neon_encode_boundary_lengths_match_scalar -- --exact
 	just test-careful-neon-smoke
@@ -335,7 +335,7 @@ verify-neon-aarch64-smoke runs='8': build-c
 	just fuzz-smoke-neon runs={{runs}}
 
 # WASM SIMD128 full verification pass via wasmtime plus host-side models.
-verify-wasm-simd128 runs='64': build-c
+verify-wasm-simd128 runs='64':
 	just test-wasm-runtime
 	just test-careful-wasm
 	just test-asan-wasm
@@ -346,7 +346,7 @@ verify-wasm-simd128 runs='64': build-c
 	just fuzz-smoke-wasm runs={{runs}}
 
 # WASM SIMD128 quick smoke via wasmtime plus host-side models.
-verify-wasm-simd128-smoke runs='8': build-c
+verify-wasm-simd128-smoke runs='8':
 	just test-wasm-runtime-smoke
 	just test-careful-wasm-smoke
 	just test-asan-wasm-smoke
@@ -361,27 +361,37 @@ bench:
 	cargo bench --features c-benchmarks
 
 # Safety verification matrix (best-effort local pass, full mode).
-verify-safety fuzz_cases='5000': build-c
-	./scripts/verify_safety.sh --fuzz-cases {{fuzz_cases}}
+# Lanes run in parallel with isolated target dirs.
+verify-safety fuzz_cases='5000' max_lanes='4' jobs='':
+	./scripts/verify_safety.sh --fuzz-cases {{fuzz_cases}} --max-lanes {{max_lanes}} {{ if jobs != '' { "--jobs " + jobs } else { "" } }}
 
 # Safety verification matrix (strict gate: fails if a layer is missing).
-verify-safety-strict fuzz_cases='5000': build-c
-	./scripts/verify_safety.sh --strict --fuzz-cases {{fuzz_cases}}
+verify-safety-strict fuzz_cases='5000' max_lanes='4' jobs='':
+	./scripts/verify_safety.sh --strict --fuzz-cases {{fuzz_cases}} --max-lanes {{max_lanes}} {{ if jobs != '' { "--jobs " + jobs } else { "" } }}
 
 # Quick safety smoke (~2 min): lint, core tests, Miri lib, one Kani per backend.
-verify-safety-smoke: build-c
-	./scripts/verify_safety.sh --mode smoke
+verify-safety-smoke max_lanes='4':
+	./scripts/verify_safety.sh --mode smoke --max-lanes {{max_lanes}}
 
 # Quick safety smoke (strict: fail on missing tools).
-verify-safety-smoke-strict: build-c
-	./scripts/verify_safety.sh --mode smoke --strict
+verify-safety-smoke-strict max_lanes='4':
+	./scripts/verify_safety.sh --mode smoke --strict --max-lanes {{max_lanes}}
+
+# Show which lanes would run without executing anything.
+verify-safety-dry-run fuzz_cases='5000':
+	./scripts/verify_safety.sh --dry-run --fuzz-cases {{fuzz_cases}}
+
+# Run safety with routing: only verify backends affected by changed files.
+# Example: git diff --name-only HEAD~1 > /tmp/changed.txt && just verify-safety-routed /tmp/changed.txt
+verify-safety-routed changed_file fuzz_cases='5000' max_lanes='4':
+	./scripts/verify_safety.sh --changed {{changed_file}} --fuzz-cases {{fuzz_cases}} --max-lanes {{max_lanes}}
 
 # Phase 0: environment/tooling baseline report for safety stack.
 safety-phase0-report report='doc/safety/baseline.md':
 	./scripts/safety_phase0_baseline.sh "{{report}}"
 
 # Phase 0: baseline report + current safety matrix run.
-safety-phase0 fuzz_cases='5000' report='doc/safety/baseline.md': build-c
+safety-phase0 fuzz_cases='5000' report='doc/safety/baseline.md':
 	./scripts/safety_phase0_baseline.sh "{{report}}"
 	./scripts/verify_safety.sh --fuzz-cases {{fuzz_cases}}
 
