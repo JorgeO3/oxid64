@@ -62,7 +62,6 @@ const MODES: &[&str] = &[
     "tb64-avx2-check",
     "tb64-avx2-partial",
     "tb64-avx2-unchecked",
-    "fastbase64-avx2-check",
     "oxid64-avx512-strict-api",
     "oxid64-avx512-strict-kernel",
     "oxid64-avx512-nonstrict-api",
@@ -76,7 +75,6 @@ const MODES: &[&str] = &[
     "oxid64-avx2-encode-api",
     "oxid64-avx2-encode-kernel",
     "tb64-avx2-encode",
-    "fastbase64-avx2-encode",
     "oxid64-avx512-encode-api",
     "oxid64-avx512-encode-kernel",
     "tb64-avx512-encode",
@@ -127,9 +125,6 @@ unsafe extern "C" {
     fn tb64v128enc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64v256enc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64v512enc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
-
-    fn fast_avx2_base64_decode(out: *mut i8, src: *const i8, srclen: usize) -> usize;
-    fn fast_avx2_base64_encode(dest: *mut i8, str_: *const i8, len: usize) -> usize;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,12 +170,7 @@ fn mode_supported(mode: &str) -> bool {
     {
         match mode {
             m if m.starts_with("oxid64-ssse3") || m.starts_with("tb64-ssse3") => has_ssse3(),
-            m if m.starts_with("oxid64-avx2")
-                || m.starts_with("tb64-avx2")
-                || m.starts_with("fastbase64-avx2") =>
-            {
-                has_avx2()
-            }
+            m if m.starts_with("oxid64-avx2") || m.starts_with("tb64-avx2") => has_avx2(),
             m if m.starts_with("oxid64-avx512") || m.starts_with("tb64-avx512") => has_avx512vbmi(),
             _ => false,
         }
@@ -325,42 +315,6 @@ fn run_c_encode(
 }
 
 // ---------------------------------------------------------------------------
-// x86-only helpers (fastbase64)
-// ---------------------------------------------------------------------------
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn run_fast_decode(encoded: &[u8], out: &mut [u8], iters: usize) -> u64 {
-    let mut acc = 0u64;
-    for _ in 0..iters {
-        let written = unsafe {
-            fast_avx2_base64_decode(
-                black_box(out.as_mut_ptr() as *mut i8),
-                black_box(encoded.as_ptr() as *const i8),
-                black_box(encoded.len()),
-            )
-        };
-        acc ^= sample_acc(out, written);
-    }
-    acc
-}
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn run_fast_encode(raw: &[u8], out: &mut [u8], iters: usize) -> u64 {
-    let mut acc = 0u64;
-    for _ in 0..iters {
-        let written = unsafe {
-            fast_avx2_base64_encode(
-                black_box(out.as_mut_ptr() as *mut i8),
-                black_box(raw.as_ptr() as *const i8),
-                black_box(raw.len()),
-            )
-        };
-        acc ^= sample_acc(out, written);
-    }
-    acc
-}
-
-// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -475,7 +429,6 @@ fn dispatch(
         "tb64-avx2-check" => run_c_decode(tb64v256dec_b64check, encoded, decode_out, iters),
         "tb64-avx2-partial" => run_c_decode(tb64v256dec, encoded, decode_out, iters),
         "tb64-avx2-unchecked" => run_c_decode(tb64v256dec_nb64check, encoded, decode_out, iters),
-        "fastbase64-avx2-check" => run_fast_decode(encoded, decode_out, iters),
         "oxid64-avx512-strict-api" => {
             let dec = Avx512VbmiDecoder::new();
             run_decode_api(&dec, encoded, decode_out, iters)
@@ -509,7 +462,6 @@ fn dispatch(
             run_encode_kernel(encode_avx2_kernel, raw, encode_out, iters)
         }
         "tb64-avx2-encode" => run_c_encode(tb64v256enc, raw, encode_out, iters),
-        "fastbase64-avx2-encode" => run_fast_encode(raw, encode_out, iters),
         "oxid64-avx512-encode-api" => {
             let enc = Avx512VbmiDecoder::new();
             run_encode_api(&enc, raw, encode_out, iters)

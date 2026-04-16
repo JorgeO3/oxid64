@@ -134,6 +134,73 @@ FUZZ_ALL=(
 # Smoke representatives for fuzz build check.
 FUZZ_SMOKE=( decode_diff roundtrip ssse3_strict_diff avx2_strict_diff )
 
+print_kani_family() {
+  local family="${1:-all}"
+  case "$family" in
+    all) printf '%s\n' "${KANI_ALL[@]}" ;;
+    smoke) printf '%s\n' "${KANI_SMOKE[@]}" ;;
+    core) printf '%s\n' "${KANI_CORE[@]}" ;;
+    ssse3) printf '%s\n' "${KANI_SSSE3[@]}" ;;
+    avx2) printf '%s\n' "${KANI_AVX2[@]}" ;;
+    avx512) printf '%s\n' "${KANI_AVX512[@]}" ;;
+    neon) printf '%s\n' "${KANI_NEON[@]}" ;;
+    wasm) printf '%s\n' "${KANI_WASM[@]}" ;;
+    *)
+      echo "unknown Kani family: $family" >&2
+      return 1
+      ;;
+  esac
+}
+
+run_kani_family() {
+  local family="${1:-all}"
+  local unwind="${2:-8}"
+  local harness
+  while IFS= read -r harness; do
+    [[ -n "$harness" ]] || continue
+    cargo kani --lib --default-unwind "$unwind" --harness "$harness"
+  done < <(print_kani_family "$family")
+}
+
+print_fuzz_family() {
+  local family="${1:-all}"
+  case "$family" in
+    all) printf '%s\n' "${FUZZ_ALL[@]}" ;;
+    smoke) printf '%s\n' "${FUZZ_SMOKE[@]}" ;;
+    x86) printf '%s\n' "${FUZZ_X86[@]}" ;;
+    common) printf '%s\n' "${FUZZ_COMMON[@]}" ;;
+    ssse3) printf '%s\n' "${FUZZ_SSSE3[@]}" ;;
+    avx2) printf '%s\n' "${FUZZ_AVX2[@]}" ;;
+    avx512) printf '%s\n' "${FUZZ_AVX512[@]}" ;;
+    neon) printf '%s\n' "${FUZZ_NEON[@]}" ;;
+    wasm) printf '%s\n' "${FUZZ_WASM[@]}" ;;
+    *)
+      echo "unknown fuzz family: $family" >&2
+      return 1
+      ;;
+  esac
+}
+
+build_fuzz_family() {
+  local family="${1:-all}"
+  local target
+  while IFS= read -r target; do
+    [[ -n "$target" ]] || continue
+    cargo +nightly fuzz build "$target"
+  done < <(print_fuzz_family "$family")
+}
+
+smoke_fuzz_family() {
+  local family="${1:-x86}"
+  local runs="${2:-32}"
+  local target
+  while IFS= read -r target; do
+    [[ -n "$target" ]] || continue
+    mkdir -p "fuzz/corpus/$target"
+    cargo +nightly fuzz run "$target" "fuzz/corpus/$target" -- -runs="$runs"
+  done < <(print_fuzz_family "$family")
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Miri shard families
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -247,12 +314,8 @@ affected_backends() {
   local -A hit=()
   local all=0
   while IFS= read -r file; do
-    # Skip docs/benchmarks unless they touch safety scripts.
-    if [[ "$file" == doc/* || "$file" == benches/* || "$file" == README.md ]]; then
-      # But safety docs/scripts trigger all.
-      if [[ "$file" == doc/safety/* || "$file" == scripts/* ]]; then
-        all=1
-      fi
+    # README and benchmark-only changes do not affect backend routing.
+    if [[ "$file" == benches/* || "$file" == README.md ]]; then
       continue
     fi
 

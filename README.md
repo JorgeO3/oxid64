@@ -161,7 +161,6 @@ Objetivo: comparar rutas escalares con la misma semántica de validación.
 | Turbo-Base64 C (`AVX2, default`) | `TBD` | `TBD` | pending |
 | `fastb64z` Zig (`Decode Fast`) | `TBD` | `TBD` | pending |
 | `FastBase64` Pascal (`Decode`) | `TBD` | `TBD` | pending |
-| `lemire/fastbase64` C (`AVX2 validate`) | `TBD` | `TBD` | pending |
 
 Current local delta:
 - `oxid64` AVX2 strict vs Turbo-Base64 AVX2 check: about **+33.0%** throughput in this snapshot.
@@ -177,7 +176,6 @@ Current local delta:
 | Turbo-Base64 C (`AVX2, default`) | `TBD` | `TBD` | pending |
 | `fastb64z` Zig (`Decode Fast`) | `TBD` | `TBD` | pending |
 | `FastBase64` Pascal (`Decode`) | `TBD` | `TBD` | pending |
-| `lemire/fastbase64` C (`AVX2 validate`) | `TBD` | `TBD` | pending |
 
 ## Encode Benchmarks
 
@@ -195,7 +193,6 @@ Current local delta:
 | Turbo-Base64 C (`AVX2`) | `TBD` | `TBD` | pending |
 | `fastb64z` Zig (`Encode Std`) | `TBD` | `TBD` | pending |
 | `FastBase64` Pascal (`Encode`) | `TBD` | `TBD` | pending |
-| `lemire/fastbase64` C (`AVX2`) | `TBD` | `TBD` | pending |
 
 ### 10 KiB (`10240` bytes)
 
@@ -211,15 +208,8 @@ Current local delta:
 | Turbo-Base64 C (`AVX2`) | `TBD` | `TBD` | pending |
 | `fastb64z` Zig (`Encode Std`) | `TBD` | `TBD` | pending |
 | `FastBase64` Pascal (`Encode`) | `TBD` | `TBD` | pending |
-| `lemire/fastbase64` C (`AVX2`) | `TBD` | `TBD` | pending |
 
 ## Reproduce Benchmarks
-
-Build C baseline:
-
-```bash
-just build-c
-```
 
 Run benchmark suite:
 
@@ -262,9 +252,10 @@ SIMD hot paths use `unsafe` intrinsics, so the project tracks safety with layere
 - Differential fuzzing (`proptest` + `cargo-fuzz` smoke targets): active
 
 Details and commands:
-- `doc/safety_verification.md`
 - `just verify-safety`
 - `just verify-safety-strict`
+- `just kani family=neon`
+- `just fuzz-build family=neon`
 
 ## Development
 

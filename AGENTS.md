@@ -15,7 +15,7 @@ If you are an agent, follow these rules and commands before coding.
 ## Build, Lint, Test
 
 ### Justfile (preferred)
-- Build C dependency: `just build-c`
+- Build: `just build`
 - Run tests (nextest): `just test`
 - Benchmarks (criterion): `just bench`
 - Format: `just fmt`
@@ -37,12 +37,6 @@ If you are an agent, follow these rules and commands before coding.
 - Specific integration test: `cargo test --test sse_decode_tests test_sse_decode_invalid_chars -- --exact`
 - Proptest case (filter): `cargo test proptest:: -- --nocapture`
 
-### C dependency
-- C static lib for comparisons is built automatically by `build.rs` when the
-  `c-benchmarks` feature is active.  Manual `just build-c` is only needed if
-  you want to inspect or update the prebuilt `Turbo-Base64/libtb64.a` (no
-  longer linked by the build system — kept for reference only).
-
 ## Benchmarks and Performance Tooling
 
 ### Criterion benches
@@ -56,14 +50,6 @@ If you are an agent, follow these rules and commands before coding.
 - List supported modes on this CPU: `./target/release/perf_compare --supported`
 - Run a mode: `./target/release/perf_compare oxid64-avx2-strict-api 1048576 10000`
 
-### SSE strict harness (x86 only)
-- Harness (asm + bench + perf): `scripts/sse_strict_harness.sh --variant strict`
-- Sweep variants and rank: `scripts/sse_strict_sweep.sh --rounds 2 --top-k 4`
-
-### Perf decode report (x86 and aarch64)
-- Full perf report: `scripts/perf_decode_report.sh`
-- Modes are detected automatically from `perf_compare --supported` on the host.
-
 ### Bench shielding (repeatability)
 - Use `scripts/bench_shield.sh` for CPU isolation and stable measurements.
 - Example:
@@ -74,7 +60,7 @@ If you are an agent, follow these rules and commands before coding.
 - `src/engine/`: scalar + SIMD engines (SSSE3, AVX2).
 - `benches/base64_bench.rs`: Criterion benchmarks, includes Turbo-Base64 C calls.
 - `tests/`: integration tests for SIMD correctness.
-- `scripts/`: performance harnesses and bench shielding utilities.
+- `scripts/`: `bench_shield.sh`, `lane_defs.sh`, and `verify_safety.sh`.
 - `Turbo-Base64/`: embedded C library used for comparisons and metrics.
 
 ## Code Style and Conventions

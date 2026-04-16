@@ -262,14 +262,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Core harnesses
         run: |
-          cargo kani --default-unwind 8 --harness remaining_matches_pointer_delta_within_allocation
-          cargo kani --default-unwind 8 --harness can_read_and_can_write_agree_with_remaining
-          cargo kani --default-unwind 8 --harness safe_in_end_for_4_within_allocation
-          cargo kani --default-unwind 8 --harness safe_in_end_for_16_within_allocation
-          cargo kani --default-unwind 8 --harness guard_helpers_imply_required_io_room
-          cargo kani --default-unwind 8 --harness prepare_decode_output_matches_decoded_len_contract
-          cargo kani --default-unwind 8 --harness decoded_and_encoded_lengths_stay_bounded_in_small_domain
-          cargo kani --default-unwind 8 --harness decode_offsets_monotonic_and_dispatch_contracts_hold
+          cargo kani --lib --default-unwind 8 --harness remaining_matches_pointer_delta_within_allocation
+          cargo kani --lib --default-unwind 8 --harness can_read_and_can_write_agree_with_remaining
+          cargo kani --lib --default-unwind 8 --harness safe_in_end_for_4_within_allocation
+          cargo kani --lib --default-unwind 8 --harness safe_in_end_for_16_within_allocation
+          cargo kani --lib --default-unwind 8 --harness guard_helpers_imply_required_io_room
+          cargo kani --lib --default-unwind 8 --harness prepare_decode_output_matches_decoded_len_contract
+          cargo kani --lib --default-unwind 8 --harness decoded_and_encoded_lengths_stay_bounded_in_small_domain
+          cargo kani --lib --default-unwind 8 --harness decode_offsets_monotonic_and_dispatch_contracts_hold
 
   kani-ssse3:
     name: Kani (SSSE3)
@@ -281,11 +281,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: SSSE3 harnesses
         run: |
-          cargo kani --default-unwind 8 --harness ssse3_ds64_store_offsets_fit_guarded_output
-          cargo kani --default-unwind 8 --harness ssse3_ds64_double_store_offsets_fit_guarded_output
-          cargo kani --default-unwind 8 --harness ssse3_tail16_store_fits_guarded_output
-          cargo kani --default-unwind 8 --harness ssse3_non_strict_schedule_model_matches_documented_lanes
-          cargo kani --default-unwind 8 --harness ssse3_written_prefix_model_is_bounded_by_decoded_output
+          cargo kani --lib --default-unwind 8 --harness ssse3_ds64_store_offsets_fit_guarded_output
+          cargo kani --lib --default-unwind 8 --harness ssse3_ds64_double_store_offsets_fit_guarded_output
+          cargo kani --lib --default-unwind 8 --harness ssse3_tail16_store_fits_guarded_output
+          cargo kani --lib --default-unwind 8 --harness ssse3_non_strict_schedule_model_matches_documented_lanes
+          cargo kani --lib --default-unwind 8 --harness ssse3_written_prefix_model_is_bounded_by_decoded_output
 
   kani-avx2:
     name: Kani (AVX2)
@@ -297,14 +297,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: AVX2 harnesses
         run: |
-          cargo kani --default-unwind 8 --harness avx2_ds128_store_offsets_fit_guarded_output
-          cargo kani --default-unwind 8 --harness avx2_ds128_double_store_offsets_fit_guarded_output
-          cargo kani --default-unwind 8 --harness avx2_ds128_triple_store_offsets_fit_guarded_output
-          cargo kani --default-unwind 8 --harness avx2_tail16_store_fits_guarded_output
-          cargo kani --default-unwind 8 --harness avx2_non_strict_schedule_model_matches_documented_lanes
-          cargo kani --default-unwind 8 --harness avx2_strict_written_prefix_model_is_bounded_by_decoded_output
-          cargo kani --default-unwind 8 --harness avx2_partial_written_prefix_model_is_bounded_by_decoded_output
-          cargo kani --default-unwind 8 --harness avx2_unchecked_preflight_matches_documented_contract
+          cargo kani --lib --default-unwind 8 --harness avx2_ds128_store_offsets_fit_guarded_output
+          cargo kani --lib --default-unwind 8 --harness avx2_ds128_double_store_offsets_fit_guarded_output
+          cargo kani --lib --default-unwind 8 --harness avx2_ds128_triple_store_offsets_fit_guarded_output
+          cargo kani --lib --default-unwind 8 --harness avx2_tail16_store_fits_guarded_output
+          cargo kani --lib --default-unwind 8 --harness avx2_non_strict_schedule_model_matches_documented_lanes
+          cargo kani --lib --default-unwind 8 --harness avx2_strict_written_prefix_model_is_bounded_by_decoded_output
+          cargo kani --lib --default-unwind 8 --harness avx2_partial_written_prefix_model_is_bounded_by_decoded_output
+          cargo kani --lib --default-unwind 8 --harness avx2_unchecked_preflight_matches_documented_contract
 
   kani-avx512:
     name: Kani (AVX-512)
@@ -316,12 +316,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: AVX-512 harnesses
         run: |
-          cargo kani --default-unwind 8 --harness avx512_ds256_store_offsets_fit_guarded_output
-          cargo kani --default-unwind 8 --harness avx512_ds256_double_store_offsets_fit_guarded_output
-          cargo kani --default-unwind 8 --harness avx512_non_strict_schedule_model_matches_documented_lanes
-          cargo kani --default-unwind 8 --harness avx512_written_prefix_model_is_bounded_by_decoded_output
-          cargo kani --default-unwind 8 --harness avx512_encode_schedule_is_contiguous_without_gaps
-          cargo kani --default-unwind 8 --harness avx512_encode_required_input_matches_farthest_load
+          cargo kani --lib --default-unwind 8 --harness avx512_ds256_store_offsets_fit_guarded_output
+          cargo kani --lib --default-unwind 8 --harness avx512_ds256_double_store_offsets_fit_guarded_output
+          cargo kani --lib --default-unwind 8 --harness avx512_non_strict_schedule_model_matches_documented_lanes
+          cargo kani --lib --default-unwind 8 --harness avx512_written_prefix_model_is_bounded_by_decoded_output
+          cargo kani --lib --default-unwind 8 --harness avx512_encode_schedule_is_contiguous_without_gaps
+          cargo kani --lib --default-unwind 8 --harness avx512_encode_required_input_matches_farthest_load
 
   kani-neon:
     name: Kani (NEON)
@@ -333,10 +333,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: NEON harnesses
         run: |
-          cargo kani --default-unwind 8 --harness neon_non_strict_schedule_model_matches_documented_lanes
-          cargo kani --default-unwind 8 --harness neon_written_prefix_model_is_bounded_by_decoded_output
-          cargo kani --default-unwind 8 --harness neon_encode_prefix_consumes_only_full_blocks
-          cargo kani --default-unwind 8 --harness neon_encode_required_input_matches_block_boundaries
+          cargo kani --lib --default-unwind 8 --harness neon_non_strict_schedule_model_matches_documented_lanes
+          cargo kani --lib --default-unwind 8 --harness neon_written_prefix_model_is_bounded_by_decoded_output
+          cargo kani --lib --default-unwind 8 --harness neon_encode_prefix_consumes_only_full_blocks
+          cargo kani --lib --default-unwind 8 --harness neon_encode_required_input_matches_block_boundaries
 
   kani-wasm:
     name: Kani (WASM)
@@ -348,14 +348,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: WASM harnesses
         run: |
-          cargo kani --default-unwind 8 --harness wasm_ds64_store_offsets_fit_guarded_output
-          cargo kani --default-unwind 8 --harness wasm_ds64_double_store_offsets_fit_guarded_output
-          cargo kani --default-unwind 8 --harness wasm_tail16_store_fits_guarded_output
-          cargo kani --default-unwind 8 --harness wasm_non_strict_schedule_model_matches_documented_lanes
-          cargo kani --default-unwind 8 --harness wasm_written_prefix_model_is_bounded_by_decoded_output
-          cargo kani --default-unwind 8 --harness wasm_pshufb_model_matches_low_nibble_spec
-          cargo kani --default-unwind 8 --harness wasm_encode_prefix_consumes_only_full_blocks
-          cargo kani --default-unwind 8 --harness wasm_encode_required_input_matches_block_boundaries
+          cargo kani --lib --default-unwind 8 --harness wasm_ds64_store_offsets_fit_guarded_output
+          cargo kani --lib --default-unwind 8 --harness wasm_ds64_double_store_offsets_fit_guarded_output
+          cargo kani --lib --default-unwind 8 --harness wasm_tail16_store_fits_guarded_output
+          cargo kani --lib --default-unwind 8 --harness wasm_non_strict_schedule_model_matches_documented_lanes
+          cargo kani --lib --default-unwind 8 --harness wasm_written_prefix_model_is_bounded_by_decoded_output
+          cargo kani --lib --default-unwind 8 --harness wasm_pshufb_model_matches_low_nibble_spec
+          cargo kani --lib --default-unwind 8 --harness wasm_encode_prefix_consumes_only_full_blocks
+          cargo kani --lib --default-unwind 8 --harness wasm_encode_required_input_matches_block_boundaries
 
   # ─────────────────────────────────────────────────────────────────────
   # Fuzz build + smoke (nightly/dispatch only)

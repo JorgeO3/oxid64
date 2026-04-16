@@ -128,10 +128,6 @@ unsafe extern "C" {
 
     fn tb64v256enc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
     fn tb64v512enc(in_: *const u8, inlen: usize, out: *mut u8) -> usize;
-
-    // Lemire fastbase64
-    fn fast_avx2_base64_decode(out: *mut i8, src: *const i8, srclen: usize) -> usize;
-    fn fast_avx2_base64_encode(dest: *mut i8, str_: *const i8, len: usize) -> usize;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,20 +334,6 @@ pub fn bench_decode_checked(c: &mut Criterion) {
                         },
                     );
                 }
-
-                group.bench_with_input(
-                    BenchmarkId::new("fastbase64 avx2 check", size),
-                    &encoded,
-                    |b, i| {
-                        b.iter(|| unsafe {
-                            fast_avx2_base64_decode(
-                                black_box(output.as_mut_ptr().cast::<i8>()),
-                                black_box(i.as_ptr().cast::<i8>()),
-                                black_box(i.len()),
-                            );
-                        });
-                    },
-                );
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -766,20 +748,6 @@ pub fn bench_encode(c: &mut Criterion) {
                         },
                     );
                 }
-
-                group.bench_with_input(
-                    BenchmarkId::new("fastbase64 avx2", size),
-                    &input,
-                    |b, i| {
-                        b.iter(|| unsafe {
-                            fast_avx2_base64_encode(
-                                black_box(output.as_mut_ptr().cast::<i8>()),
-                                black_box(i.as_ptr().cast::<i8>()),
-                                black_box(i.len()),
-                            );
-                        });
-                    },
-                );
             }
 
             #[cfg(target_arch = "aarch64")]

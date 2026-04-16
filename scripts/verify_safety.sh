@@ -318,7 +318,7 @@ lane_kani_family() {
   echo "=== Kani: $family_name (${#harnesses[@]} harnesses) ==="
   for h in "${harnesses[@]}"; do
     echo "  proving: $h"
-    cargo kani --default-unwind 8 --harness "$h"
+    cargo kani --lib --default-unwind 8 --harness "$h"
   done
 }
 
