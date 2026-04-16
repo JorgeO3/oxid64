@@ -111,6 +111,22 @@ if [[ -n "$CHANGED_FILE" && -f "$CHANGED_FILE" ]]; then
   ACTIVE_BACKENDS="$(affected_backends < "$CHANGED_FILE")"
 fi
 
+HOST_ARCH="$(uname -m 2>/dev/null || echo unknown)"
+
+host_has_native_x86() {
+  case "$HOST_ARCH" in
+    x86_64|amd64|i686|i386) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+host_has_native_neon() {
+  case "$HOST_ARCH" in
+    aarch64|arm64) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 backend_active() {
   local backend="$1"
   [[ "$ACTIVE_BACKENDS" == "all" ]] || [[ " $ACTIVE_BACKENDS " == *" $backend "* ]]
@@ -234,8 +250,18 @@ lane_doctest() {
 }
 
 lane_proptest_extended() {
+  local bins=( --test proptest )
+
+  if host_has_native_x86; then
+    if backend_active ssse3 || backend_active avx2 || backend_active avx512; then
+      bins=( "${PROPTEST_X86_BINS[@]}" )
+    fi
+  elif host_has_native_neon && backend_active neon; then
+    bins+=( "${PROPTEST_NEON_BINS[@]}" )
+  fi
+
   echo "=== proptest extended (PROPTEST_CASES=${FUZZ_CASES}) ==="
-  env PROPTEST_CASES="${FUZZ_CASES}" cargo test "${PROPTEST_X86_BINS[@]}"
+  env PROPTEST_CASES="${FUZZ_CASES}" cargo test "${bins[@]}"
 }
 
 lane_careful() {
@@ -278,8 +304,16 @@ lane_miri_other_models() {
 
 lane_miri_proptest() {
   local flags="-Zmiri-backtrace=full -Zmiri-symbolic-alignment-check -Zmiri-strict-provenance -Zmiri-disable-isolation"
+  local bins=( --test proptest )
+
+  if host_has_native_x86; then
+    if backend_active ssse3 || backend_active avx2 || backend_active avx512; then
+      bins=( "${MIRI_SHARD_PROPTEST[@]}" )
+    fi
+  fi
+
   echo "=== Miri: proptest bins ==="
-  MIRIFLAGS="$flags" cargo +nightly miri test "${MIRI_SHARD_PROPTEST[@]}"
+  MIRIFLAGS="$flags" cargo +nightly miri test "${bins[@]}"
 }
 
 lane_miri_x86_integration() {
@@ -347,7 +381,7 @@ echo "╔═══════════════════════�
 echo "║ oxid64 Safety Verification (Swiss-Cheese)   ║"
 echo "╚══════════════════════════════════════════════╝"
 echo "MODE=${MODE}  STRICT=${STRICT}  FUZZ_CASES=${FUZZ_CASES}  FUZZ_RUNS=${FUZZ_RUNS}"
-echo "MAX_LANES=${MAX_LANES}  JOBS/LANE=${CARGO_JOBS}  BACKENDS=${ACTIVE_BACKENDS}"
+echo "MAX_LANES=${MAX_LANES}  JOBS/LANE=${CARGO_JOBS}  HOST_ARCH=${HOST_ARCH}  BACKENDS=${ACTIVE_BACKENDS}"
 
 # --- Dry run -----------------------------------------------------------------
 if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -357,7 +391,10 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   if [[ "$MODE" == "full" ]]; then
     echo "  Always (full): proptest-extended, careful"
     echo "  Miri shards: lib, contracts"
-    backend_active ssse3 && echo "  Miri shards: x86-models, x86-integration"
+    ( backend_active ssse3 || backend_active avx2 || backend_active avx512 ) && echo "  Miri shards: x86-models"
+    if host_has_native_x86 && ( backend_active ssse3 || backend_active avx2 || backend_active avx512 ); then
+      echo "  Miri shards: x86-integration"
+    fi
     backend_active neon || backend_active wasm && echo "  Miri shards: other-models"
     [[ "$MODE" == "full" ]] && echo "  Miri shards: proptest"
     echo "  Sanitizers: asan, msan"
@@ -425,7 +462,9 @@ if have_miri; then
   if [[ "$MODE" == "full" ]]; then
     if backend_active ssse3 || backend_active avx2 || backend_active avx512; then
       launch_lane miri-x86-models lane_miri_x86_models
-      launch_lane miri-x86-integration lane_miri_x86_integration
+      if host_has_native_x86; then
+        launch_lane miri-x86-integration lane_miri_x86_integration
+      fi
     fi
     if backend_active neon || backend_active wasm; then
       launch_lane miri-other-models lane_miri_other_models
@@ -433,8 +472,12 @@ if have_miri; then
     launch_lane miri-proptest lane_miri_proptest
   else
     # Smoke: just models (fast).
-    launch_lane miri-x86-models lane_miri_x86_models
-    launch_lane miri-other-models lane_miri_other_models
+    if backend_active ssse3 || backend_active avx2 || backend_active avx512; then
+      launch_lane miri-x86-models lane_miri_x86_models
+    fi
+    if backend_active neon || backend_active wasm; then
+      launch_lane miri-other-models lane_miri_other_models
+    fi
   fi
 else
   warn_or_fail "cargo-miri not installed (rustup component add miri --toolchain nightly)." || true
@@ -468,15 +511,29 @@ fi
 # --- Fuzz ---
 if have_fuzz; then
   if [[ "$MODE" == "smoke" ]]; then
-    launch_lane fuzz-build-smoke lane_fuzz_build "${FUZZ_SMOKE[@]}"
+    local_fuzz_targets=( decode_diff roundtrip )
+    if host_has_native_x86; then
+      backend_active ssse3 && local_fuzz_targets+=( ssse3_strict_diff )
+      backend_active avx2 && local_fuzz_targets+=( avx2_strict_diff )
+      backend_active avx512 && local_fuzz_targets+=( avx512_strict_diff )
+    fi
+    if host_has_native_neon; then
+      backend_active neon && local_fuzz_targets+=( neon_strict_diff )
+    fi
+    backend_active wasm && local_fuzz_targets+=( wasm_pshufb_compat )
+    launch_lane fuzz-build-smoke lane_fuzz_build "${local_fuzz_targets[@]}"
   else
     # Build all affected targets, then smoke-run.
     local_fuzz_targets=()
     local_fuzz_targets+=("${FUZZ_COMMON[@]}")
-    backend_active ssse3  && local_fuzz_targets+=("${FUZZ_SSSE3[@]}")
-    backend_active avx2   && local_fuzz_targets+=("${FUZZ_AVX2[@]}")
-    backend_active avx512 && local_fuzz_targets+=("${FUZZ_AVX512[@]}")
-    backend_active neon   && local_fuzz_targets+=("${FUZZ_NEON[@]}")
+    if host_has_native_x86; then
+      backend_active ssse3  && local_fuzz_targets+=("${FUZZ_SSSE3[@]}")
+      backend_active avx2   && local_fuzz_targets+=("${FUZZ_AVX2[@]}")
+      backend_active avx512 && local_fuzz_targets+=("${FUZZ_AVX512[@]}")
+    fi
+    if host_has_native_neon; then
+      backend_active neon   && local_fuzz_targets+=("${FUZZ_NEON[@]}")
+    fi
     backend_active wasm   && local_fuzz_targets+=("${FUZZ_WASM[@]}")
 
     # Fuzz build and smoke share a target dir to reuse compilation.
