@@ -1162,6 +1162,7 @@ fn wasm_pshufb_model_matches_low_nibble_spec() {
 }
 
 #[kani::proof]
+#[kani::unwind(11)]
 fn wasm_encode_prefix_consumes_only_full_blocks() {
     let len: usize = kani::any();
     kani::assume(len <= 1024);
