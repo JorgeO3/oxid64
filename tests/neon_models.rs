@@ -59,7 +59,6 @@ fn neon_decode_model_schedule_and_prefix_bounds() {
 
 mod native {
     use super::{non_strict_checks_offset, simd_touched_prefix_before_error};
-    use oxid64::Base64Decoder;
     use oxid64::engine::DecodeOpts;
     use oxid64::engine::neon::NeonDecoder;
     use oxid64::engine::scalar::encode_base64_fast;
