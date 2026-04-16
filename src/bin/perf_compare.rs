@@ -10,17 +10,17 @@
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use oxid64::engine::avx2::{
-    decode_avx2_kernel_partial, decode_avx2_kernel_strict, decode_avx2_kernel_unchecked,
-    encode_avx2_kernel, Avx2Decoder,
+    Avx2Decoder, decode_avx2_kernel_partial, decode_avx2_kernel_strict,
+    decode_avx2_kernel_unchecked, encode_avx2_kernel,
 };
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use oxid64::engine::avx512vbmi::{
-    decode_avx512_kernel_partial, decode_avx512_kernel_strict, encode_avx512_kernel,
-    Avx512VbmiDecoder,
+    Avx512VbmiDecoder, decode_avx512_kernel_partial, decode_avx512_kernel_strict,
+    encode_avx512_kernel,
 };
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use oxid64::engine::ssse3::{
-    decode_ssse3_kernel_partial, decode_ssse3_kernel_strict, encode_ssse3_kernel, Ssse3Decoder,
+    Ssse3Decoder, decode_ssse3_kernel_partial, decode_ssse3_kernel_strict, encode_ssse3_kernel,
 };
 
 // ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ use oxid64::engine::ssse3::{
 
 #[cfg(target_arch = "aarch64")]
 use oxid64::engine::neon::{
-    decode_neon_kernel_partial, decode_neon_kernel_strict, encode_neon_kernel, NeonDecoder,
+    NeonDecoder, decode_neon_kernel_partial, decode_neon_kernel_strict, encode_neon_kernel,
 };
 
 // ---------------------------------------------------------------------------
